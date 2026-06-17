@@ -1,16 +1,19 @@
 /* =====================================================================
    TrackAbility — application logic
    Firestore (shared, live sync) + EmailJS (nudges)
+
+   Flow: pick an operative -> today's log opens automatically.
+   A fresh date is auto-created each new day (midnight America/New_York).
+   The operative's full history lives in the dates sub-rail.
+
    Data model:
-     people (collection)
-       <personId> { name, email, createdAt }
-         days (subcollection)
-           <YYYY-MM-DD> { date, note, tasks:[{id,text,status}], updatedAt }
+     people/<personId> { name, email, createdAt }
+       days/<YYYY-MM-DD> { date, note, tasks:[{id,text,status}], updatedAt }
    ===================================================================== */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot,
+  getFirestore, collection, doc, setDoc, onSnapshot,
   serverTimestamp, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -37,17 +40,21 @@ const state = {
   selPerson: null,            // personId
   selDate: null,              // 'YYYY-MM-DD'
   curDay: null,               // active day doc data
-  view: "list",
-  completedOpen: {}           // personId -> bool (is the "completed" group expanded)
+  view: "list"
 };
 
 /* ---------- helpers ---------- */
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 const esc = s => (s??"").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
-const todayStr = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
 const initials = n => (n||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
 const uid = () => "t" + Math.random().toString(36).slice(2,9) + (performance.now()|0).toString(36);
+
+// "today" anchored to America/New_York (EST/EDT) -> YYYY-MM-DD
+function estTodayStr(){
+  return new Intl.DateTimeFormat("en-CA",{ timeZone:"America/New_York",
+    year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
+}
 function fmtDate(s){
   const [y,m,d]=s.split("-").map(Number);
   const dt=new Date(y,m-1,d);
@@ -56,7 +63,7 @@ function fmtDate(s){
 let toastT;
 function toast(msg, isErr=false){
   const t=$("#toast"); t.textContent=msg; t.className="toast"+(isErr?" err":"");
-  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.add("hidden"),3200);
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.add("hidden"),3600);
 }
 
 /* =====================================================================
@@ -66,9 +73,8 @@ onSnapshot(collection(db,"people"),
   snap => {
     state.people = snap.docs.map(d=>({id:d.id, ...d.data()}))
                        .sort((a,b)=>(a.name||"").localeCompare(b.name||""));
-    // ensure a days listener exists for each person (for "behind" flags)
     state.people.forEach(p => subscribeDays(p.id));
-    renderPeople();
+    renderOps();
     setSync(true);
   },
   err => { console.error(err); setSync(false); toast("Sync error — check Firestore rules.", true); }
@@ -79,111 +85,91 @@ function subscribeDays(personId){
   const q = query(collection(db,"people",personId,"days"), orderBy("date","desc"));
   state.dayUnsubs[personId] = onSnapshot(q, snap=>{
     state.daysByPerson[personId] = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderPeople();
-    if (state.selPerson===personId) {/* date list re-renders via renderPeople */}
+    renderOps();
+    if (state.selPerson===personId) renderDateList();
   });
 }
 
 /* =====================================================================
-   RENDER: sidebar tree
+   TIER 1 — operatives list (simple; select -> open today)
    ===================================================================== */
-function renderPeople(){
-  const wrap=$("#peopleList");
-  if(!state.people.length){
-    wrap.innerHTML=`<div class="date-empty">No operatives yet. Hit + to deploy one.</div>`;
-    return;
-  }
-  wrap.innerHTML = state.people.map(p=>{
-    const open = state.selPerson===p.id;
-    const days = state.daysByPerson[p.id]||[];
-    const behind = isBehind(p.id);
-    const flag = behind
-      ? `<span class="person-flag behind">BEHIND</span>`
-      : (days.length ? `<span class="person-flag ok">ON TRACK</span>` : "");
-    const dateRows = open ? renderDates(p.id, days) : "";
-    const tools = open ? `
-      <div class="person-tools">
-        <button class="tool-btn" data-act="addday" data-p="${p.id}">+ ADD DATE</button>
-        <button class="tool-btn nudge" data-act="nudge" data-p="${p.id}">▲ NUDGE</button>
-      </div>` : "";
-    return `
-      <div class="person ${open?"open":""}" data-p="${p.id}">
-        <div class="person-row" data-act="toggle" data-p="${p.id}">
-          <span class="person-caret">▶</span>
-          <span class="person-badge">${esc(initials(p.name))}</span>
-          <span class="person-name">${esc(p.name)}</span>
-          ${flag}
-        </div>
-        ${tools}
-        ${dateRows}
-      </div>`;
-  }).join("");
-}
-
-function isDateComplete(d){
-  const tasks=d.tasks||[];
-  return tasks.length>0 && tasks.every(t=>t.status==="done");
-}
-function dateRowHTML(personId, d){
-  const tasks=d.tasks||[];
-  const done=tasks.filter(t=>t.status==="done").length;
-  const active = state.selPerson===personId && state.selDate===d.id;
-  const check = isDateComplete(d) ? `<span class="di-check">✓</span>` : "";
-  return `<div class="date-item ${active?"active":""}" data-act="openday" data-p="${personId}" data-d="${d.id}">
-            ${check}<span>${esc(fmtDate(d.id))}</span>
-            <span class="di-prog">${done}/${tasks.length}</span>
-          </div>`;
-}
-function renderDates(personId, days){
-  if(!days.length) return `<div class="date-list"><div class="date-empty">No dates logged.</div></div>`;
-  const active = days.filter(d=>!isDateComplete(d));
-  const completed = days.filter(isDateComplete);
-  let html = active.map(d=>dateRowHTML(personId,d)).join("")
-             || `<div class="date-empty">All caught up — no open dates.</div>`;
-  if(completed.length){
-    const open = !!state.completedOpen[personId];
-    html += `
-      <div class="completed-group ${open?"open":""}">
-        <div class="completed-head" data-act="togglecompleted" data-p="${personId}">
-          <span class="cg-caret">▶</span>
-          <span>✓ COMPLETED</span>
-          <span class="cg-count">${completed.length}</span>
-        </div>
-        <div class="completed-body">${completed.map(d=>dateRowHTML(personId,d)).join("")}</div>
-      </div>`;
-  }
-  return `<div class="date-list">${html}</div>`;
-}
-
-// "behind" = no entry for today, OR today's entry has tasks but none complete
 function isBehind(personId){
   const days = state.daysByPerson[personId];
   if(!days) return false;
-  const today = days.find(d=>d.id===todayStr());
+  const today = days.find(d=>d.id===estTodayStr());
   if(!today) return true;
   const tasks = today.tasks||[];
   if(!tasks.length) return true;
   return !tasks.some(t=>t.status==="done");
 }
 
-/* sidebar click delegation */
-$("#peopleList").addEventListener("click", e=>{
-  const el = e.target.closest("[data-act]"); if(!el) return;
-  const act=el.dataset.act, pid=el.dataset.p;
-  if(act==="toggle"){
-    state.selPerson = state.selPerson===pid ? null : pid;
-    if(state.selPerson!==pid) {/* keep selDate */}
-    renderPeople();
-  } else if(act==="addday"){
-    addDay(pid);
-  } else if(act==="nudge"){
-    openNudge(pid);
-  } else if(act==="openday"){
-    openDay(pid, el.dataset.d);
-  } else if(act==="togglecompleted"){
-    state.completedOpen[pid] = !state.completedOpen[pid];
-    renderPeople();
+function renderOps(){
+  const wrap=$("#peopleList");
+  if(!state.people.length){
+    wrap.innerHTML=`<div class="date-empty">No operatives yet. Hit + to deploy one.</div>`;
+    return;
   }
+  wrap.innerHTML = state.people.map(p=>{
+    const sel = state.selPerson===p.id;
+    const days = state.daysByPerson[p.id]||[];
+    const behind = isBehind(p.id);
+    const flag = behind
+      ? `<span class="person-flag behind">BEHIND</span>`
+      : (days.length ? `<span class="person-flag ok">ON TRACK</span>` : "");
+    return `
+      <div class="op-row ${sel?"sel":""}" data-act="selectop" data-p="${p.id}">
+        <span class="person-badge">${esc(initials(p.name))}</span>
+        <span class="person-name">${esc(p.name)}</span>
+        ${flag}
+      </div>`;
+  }).join("");
+}
+
+$("#peopleList").addEventListener("click", e=>{
+  const el = e.target.closest("[data-act='selectop']"); if(!el) return;
+  selectPerson(el.dataset.p);
+});
+
+async function selectPerson(personId){
+  state.selPerson = personId;
+  renderOps();
+  const today = await ensureToday(personId);   // auto-create today if missing
+  renderDateList();
+  openDay(personId, today);
+}
+
+/* =====================================================================
+   TIER 2 — dates sub-rail (history)
+   ===================================================================== */
+function renderDateList(){
+  const person = state.people.find(p=>p.id===state.selPerson);
+  $("#datesOpName").textContent = person ? person.name.toUpperCase() : "SELECT OPERATIVE";
+  const pane=$("#dateList");
+  if(!person){ pane.innerHTML=`<div class="date-empty">Choose an operative to view their daily logs.</div>`; return; }
+
+  const days = state.daysByPerson[state.selPerson]||[];   // already newest-first
+  const today = estTodayStr();
+  if(!days.length){ pane.innerHTML=`<div class="date-empty">No logs yet.</div>`; return; }
+
+  pane.innerHTML = days.map(d=>{
+    const tasks=d.tasks||[];
+    const done=tasks.filter(t=>t.status==="done").length;
+    const active = state.selDate===d.id;
+    const isToday = d.id===today;
+    const complete = tasks.length>0 && done===tasks.length;
+    const badge = isToday ? `<span class="di-today">TODAY</span>`
+                          : (complete ? `<span class="di-check">✓</span>` : "");
+    return `<div class="date-item ${active?"active":""} ${isToday?"today":""}" data-act="openday" data-d="${d.id}">
+              <span class="di-label">${esc(fmtDate(d.id))}</span>
+              ${badge}
+              <span class="di-prog">${done}/${tasks.length}</span>
+            </div>`;
+  }).join("");
+}
+
+$("#dateList").addEventListener("click", e=>{
+  const el=e.target.closest("[data-act='openday']"); if(!el||!state.selPerson) return;
+  openDay(state.selPerson, el.dataset.d);
 });
 
 /* =====================================================================
@@ -192,24 +178,24 @@ $("#peopleList").addEventListener("click", e=>{
 async function addPerson(name, email){
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || uid();
   await setDoc(doc(db,"people",id), { name, email:email||"", createdAt:serverTimestamp() });
-  state.selPerson=id; toast(`Operative "${name}" deployed.`);
+  selectPerson(id);
+  toast(`Operative "${name}" deployed.`);
 }
 
-async function addDay(personId, date){
-  const d = date || todayStr();
-  const ref = doc(db,"people",personId,"days",d);
+// create today's date doc if it doesn't already exist; returns today's id
+async function ensureToday(personId){
+  const d = estTodayStr();
   const existing = (state.daysByPerson[personId]||[]).find(x=>x.id===d);
   if(!existing){
-    await setDoc(ref,{ date:d, note:"", tasks:[], updatedAt:serverTimestamp() });
+    await setDoc(doc(db,"people",personId,"days",d),
+      { date:d, note:"", tasks:[], updatedAt:serverTimestamp() });
   }
-  state.selPerson=personId;
-  openDay(personId, d);
+  return d;
 }
 
 async function persistDay(){
   if(!state.selPerson||!state.selDate||!state.curDay) return;
-  const ref=doc(db,"people",state.selPerson,"days",state.selDate);
-  await setDoc(ref,{
+  await setDoc(doc(db,"people",state.selPerson,"days",state.selDate),{
     date: state.selDate,
     note: state.curDay.note||"",
     tasks: state.curDay.tasks||[],
@@ -226,12 +212,14 @@ function openDay(personId, date){
   if(state.daySub){ state.daySub(); state.daySub=null; }
   $("#welcome").classList.add("hidden");
   $("#dayView").classList.remove("hidden");
+  renderDateList(); // refresh active highlight
 
   const ref=doc(db,"people",personId,"days",date);
   state.daySub = onSnapshot(ref, snap=>{
     state.curDay = snap.exists() ? snap.data() : { date, note:"", tasks:[] };
     renderDay();
-    renderPeople(); // refresh active highlight + counts
+    renderOps();
+    renderDateList();
   });
 }
 
@@ -241,7 +229,6 @@ function renderDay(){
   $("#crumbDate").textContent = state.selDate || "—";
   $("#dayTitle").textContent = state.selDate ? fmtDate(state.selDate).toUpperCase() : "DAILY LOG";
 
-  // note (don't clobber while user is typing)
   const noteEl=$("#noteArea");
   if(document.activeElement!==noteEl) noteEl.value = state.curDay.note||"";
 
@@ -280,21 +267,14 @@ function renderKanban(){
   });
 }
 
-/* task mutations (operate on local copy then persist; snapshot re-renders) */
-function setTasks(fn){
-  state.curDay.tasks = fn([...(state.curDay.tasks||[])]);
-  persistDay();
-}
-function addTask(text){
-  if(!text.trim()) return;
-  setTasks(ts=>[...ts,{id:uid(),text:text.trim(),status:"todo"}]);
-}
+/* task mutations */
+function setTasks(fn){ state.curDay.tasks = fn([...(state.curDay.tasks||[])]); persistDay(); }
+function addTask(text){ if(!text.trim()) return; setTasks(ts=>[...ts,{id:uid(),text:text.trim(),status:"todo"}]); }
 function delTask(id){ setTasks(ts=>ts.filter(t=>t.id!==id)); }
 function setStatus(id,status){ setTasks(ts=>ts.map(t=>t.id===id?{...t,status}:t)); }
 function cycleStatus(id){
   const cur=(state.curDay.tasks||[]).find(t=>t.id===id);
-  const next={todo:"doing",doing:"done",done:"todo"}[cur?.status||"todo"];
-  setStatus(id,next);
+  setStatus(id, {todo:"doing",doing:"done",done:"todo"}[cur?.status||"todo"]);
 }
 function toggleDone(id){
   const cur=(state.curDay.tasks||[]).find(t=>t.id===id);
@@ -310,7 +290,7 @@ $("#listView").addEventListener("click", e=>{
   else if(el.dataset.act==="del") delTask(id);
 });
 
-/* kanban interactions: delete + drag/drop */
+/* kanban interactions */
 $("#kanbanView").addEventListener("click", e=>{
   const del=e.target.closest('[data-act="del"]'); if(del) delTask(del.dataset.id);
 });
@@ -345,7 +325,7 @@ $$(".view-btn").forEach(btn=>btn.addEventListener("click", ()=>{
   renderDay();
 }));
 
-/* note autosave (debounced) */
+/* note autosave */
 let noteT;
 $("#noteArea").addEventListener("input", e=>{
   state.curDay.note=e.target.value;
@@ -370,33 +350,37 @@ $("#personSave").addEventListener("click", async ()=>{
   try{ await addPerson(name,email); }catch(e){ console.error(e); toast("Save failed — check Firestore rules.", true); }
 });
 
-/* nudge */
-const nudgeModal=$("#nudgeModal"); let nudgeTarget=null;
+/* nudge — targets the currently open operative */
+const nudgeModal=$("#nudgeModal");
+$("#nudgeBtn").addEventListener("click", ()=>{ if(state.selPerson) openNudge(state.selPerson); });
 function openNudge(personId){
   const p=state.people.find(x=>x.id===personId); if(!p) return;
   if(!p.email){ toast(`${p.name} has no email on file.`, true); return; }
-  nudgeTarget=p;
   const behind=isBehind(personId);
   $("#nudgeSummary").innerHTML = behind
     ? `<b>${esc(p.name)}</b> looks <b>behind</b> on today's log. Fire off a friendly nudge to <b>${esc(p.email)}</b>.`
     : `Send an accountability ping to <b>${esc(p.name)}</b> at <b>${esc(p.email)}</b>.`;
   $("#nudgeMsg").value = `Hey ${p.name}, just checking in — don't forget to log your accountability tracker today. Let's keep the streak going! 💪`;
+  nudgeModal.dataset.target=personId;
   nudgeModal.classList.remove("hidden");
 }
 $("#nudgeCancel").addEventListener("click", ()=>nudgeModal.classList.add("hidden"));
 $("#nudgeSend").addEventListener("click", async ()=>{
-  if(!nudgeTarget) return;
-  if(!emailReady){ toast("EmailJS not configured yet (need Service ID + Template ID).", true); return; }
+  const p=state.people.find(x=>x.id===nudgeModal.dataset.target); if(!p) return;
+  if(!emailReady){ toast("EmailJS not configured yet (need Service ID).", true); return; }
   const btn=$("#nudgeSend"); btn.disabled=true; btn.textContent="SENDING…";
+  // Send the address under several common variable names so it maps no matter
+  // which one the EmailJS template's "To Email" field references.
+  const params = {
+    to_email: p.email, email: p.email, user_email: p.email, recipient: p.email, to: p.email, reply_to: p.email,
+    to_name: p.name, name: p.name,
+    from_name: CFG.myName||"A friend",
+    message: $("#nudgeMsg").value,
+    days_behind: isBehind(p.id) ? "behind" : "on track"
+  };
   try{
-    await emailjs.send(CFG.emailjs.serviceId, CFG.emailjs.templateId, {
-      to_email: nudgeTarget.email,
-      to_name:  nudgeTarget.name,
-      from_name: CFG.myName||"A friend",
-      message: $("#nudgeMsg").value,
-      days_behind: isBehind(nudgeTarget.id) ? "behind" : "on track"
-    });
-    toast(`Nudge sent to ${nudgeTarget.name}.`);
+    await emailjs.send(CFG.emailjs.serviceId, CFG.emailjs.templateId, params);
+    toast(`Nudge sent to ${p.name}.`);
     nudgeModal.classList.add("hidden");
   }catch(e){
     console.error("EmailJS error:", e);
@@ -413,19 +397,43 @@ document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ personModal.clas
 /* =====================================================================
    SIDEBAR COLLAPSE  (desktop slide-away + mobile drawer)
    ===================================================================== */
-const isMobile = () => window.matchMedia("(max-width:760px)").matches;
+const isMobile = () => window.matchMedia("(max-width:820px)").matches;
 function setNav(collapsed, remember=true){
   document.body.classList.toggle("nav-collapsed", collapsed);
   if(remember && !isMobile()) localStorage.setItem("ta_nav_collapsed", collapsed ? "1" : "0");
 }
-// initial state: phones start collapsed (content first); desktop restores last choice
 setNav(isMobile() ? true : localStorage.getItem("ta_nav_collapsed")==="1", false);
-
 $("#navCollapse").addEventListener("click", ()=>setNav(true));
 $("#navReopen").addEventListener("click", ()=>setNav(false));
 $("#navBackdrop").addEventListener("click", ()=>setNav(true));
-// on mobile, picking a day should close the drawer so the log is visible
 function maybeCloseDrawer(){ if(isMobile()) setNav(true, false); }
+
+/* =====================================================================
+   DAILY ROLLOVER — at America/New_York midnight, append the new day
+   for the selected operative and jump to it.
+   ===================================================================== */
+function msToNextEstMidnight(){
+  const now = new Date();
+  // current wall-clock in New York
+  const est = new Date(now.toLocaleString("en-US",{timeZone:"America/New_York"}));
+  const next = new Date(est);
+  next.setHours(24,0,8,0);              // 00:00:08 just after midnight
+  return Math.max(1000, next - est);
+}
+function scheduleRollover(){
+  setTimeout(async ()=>{
+    if(state.selPerson){
+      try{
+        const today = await ensureToday(state.selPerson);
+        renderDateList();
+        openDay(state.selPerson, today);
+        toast("New day logged — fresh objectives await.");
+      }catch(e){ console.error(e); }
+    }
+    scheduleRollover();                 // re-arm for the following midnight
+  }, msToNextEstMidnight());
+}
+scheduleRollover();
 
 /* sync indicator */
 function setSync(ok){

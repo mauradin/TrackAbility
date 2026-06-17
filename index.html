@@ -15,36 +15,50 @@
   <div class="bg-scanlines" aria-hidden="true"></div>
   <div class="bg-glow" aria-hidden="true"></div>
 
-  <!-- floating reopen button (shown when sidebar collapsed) -->
-  <button id="navReopen" class="nav-reopen" title="Show operatives" aria-label="Show operatives">☰</button>
+  <!-- floating reopen button (shown when nav collapsed) -->
+  <button id="navReopen" class="nav-reopen" title="Show command rail" aria-label="Show command rail">☰</button>
   <!-- mobile drawer backdrop -->
   <div id="navBackdrop" class="nav-backdrop" aria-hidden="true"></div>
 
   <div class="app">
-    <!-- ================= SIDEBAR ================= -->
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">◢◤</div>
-        <div class="brand-text">
-          <h1>TRACK<span>ABILITY</span></h1>
-          <p>ACCOUNTABILITY COMMAND</p>
+    <!-- ================= COMMAND RAIL (two columns) ================= -->
+    <div class="nav">
+      <!-- TIER 1: operatives -->
+      <aside class="rail rail-ops">
+        <div class="brand">
+          <div class="brand-mark">◢◤</div>
+          <div class="brand-text">
+            <h1>TRACK<span>ABILITY</span></h1>
+            <p>ACCOUNTABILITY COMMAND</p>
+          </div>
+          <button id="navCollapse" class="nav-collapse" title="Collapse rail" aria-label="Collapse rail">«</button>
         </div>
-        <button id="navCollapse" class="nav-collapse" title="Collapse operatives" aria-label="Collapse operatives">«</button>
-      </div>
 
-      <div class="sidebar-section">
-        <div class="section-label">
-          <span>OPERATIVES</span>
-          <button id="addPersonBtn" class="mini-btn" title="Add operative">+</button>
+        <div class="rail-section">
+          <div class="section-label">
+            <span>OPERATIVES</span>
+            <button id="addPersonBtn" class="mini-btn" title="Add operative">+</button>
+          </div>
+          <div id="peopleList" class="people-list"><!-- people injected here --></div>
         </div>
-        <div id="peopleList" class="people-list"><!-- people injected here --></div>
-      </div>
 
-      <div class="sidebar-foot">
-        <span id="syncDot" class="sync-dot offline"></span>
-        <span id="syncText">CONNECTING…</span>
-      </div>
-    </aside>
+        <div class="rail-foot">
+          <span id="syncDot" class="sync-dot offline"></span>
+          <span id="syncText">CONNECTING…</span>
+        </div>
+      </aside>
+
+      <!-- TIER 2: dates for the selected operative -->
+      <aside class="rail rail-dates" id="railDates">
+        <div class="dates-head">
+          <span id="datesOpName" class="dates-op">SELECT OPERATIVE</span>
+          <span class="dates-sub">MISSION LOG</span>
+        </div>
+        <div id="dateList" class="date-list-pane">
+          <div class="date-empty">Choose an operative to view their daily logs.</div>
+        </div>
+      </aside>
+    </div>
 
     <!-- ================= MAIN ================= -->
     <main class="main">
@@ -53,7 +67,7 @@
         <div class="welcome-inner">
           <div class="welcome-glyph">◢◤</div>
           <h2>STANDING BY</h2>
-          <p>Select an operative and a date from the command rail,<br/>or deploy a new log entry to begin tracking.</p>
+          <p>Select an operative from the command rail.<br/>Today's log opens automatically.</p>
         </div>
       </section>
 
@@ -69,6 +83,7 @@
             <h2 id="dayTitle">DAILY LOG</h2>
           </div>
           <div class="day-actions">
+            <button id="nudgeBtn" class="nudge-btn" title="Send accountability nudge">▲ NUDGE</button>
             <div class="view-toggle" role="tablist">
               <button class="view-btn active" data-view="list">▤ LIST</button>
               <button class="view-btn" data-view="kanban">▦ KANBAN</button>
