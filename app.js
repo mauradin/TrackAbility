@@ -37,7 +37,8 @@ const state = {
   selPerson: null,            // personId
   selDate: null,              // 'YYYY-MM-DD'
   curDay: null,               // active day doc data
-  view: "list"
+  view: "list",
+  completedOpen: {}           // personId -> bool (is the "completed" group expanded)
 };
 
 /* ---------- helpers ---------- */
@@ -119,19 +120,39 @@ function renderPeople(){
   }).join("");
 }
 
+function isDateComplete(d){
+  const tasks=d.tasks||[];
+  return tasks.length>0 && tasks.every(t=>t.status==="done");
+}
+function dateRowHTML(personId, d){
+  const tasks=d.tasks||[];
+  const done=tasks.filter(t=>t.status==="done").length;
+  const active = state.selPerson===personId && state.selDate===d.id;
+  const check = isDateComplete(d) ? `<span class="di-check">✓</span>` : "";
+  return `<div class="date-item ${active?"active":""}" data-act="openday" data-p="${personId}" data-d="${d.id}">
+            ${check}<span>${esc(fmtDate(d.id))}</span>
+            <span class="di-prog">${done}/${tasks.length}</span>
+          </div>`;
+}
 function renderDates(personId, days){
-  const inner = days.length
-    ? days.map(d=>{
-        const tasks=d.tasks||[];
-        const done=tasks.filter(t=>t.status==="done").length;
-        const active = state.selPerson===personId && state.selDate===d.id;
-        return `<div class="date-item ${active?"active":""}" data-act="openday" data-p="${personId}" data-d="${d.id}">
-                  <span>${esc(fmtDate(d.id))}</span>
-                  <span class="di-prog">${done}/${tasks.length}</span>
-                </div>`;
-      }).join("")
-    : `<div class="date-empty">No dates logged.</div>`;
-  return `<div class="date-list">${inner}</div>`;
+  if(!days.length) return `<div class="date-list"><div class="date-empty">No dates logged.</div></div>`;
+  const active = days.filter(d=>!isDateComplete(d));
+  const completed = days.filter(isDateComplete);
+  let html = active.map(d=>dateRowHTML(personId,d)).join("")
+             || `<div class="date-empty">All caught up — no open dates.</div>`;
+  if(completed.length){
+    const open = !!state.completedOpen[personId];
+    html += `
+      <div class="completed-group ${open?"open":""}">
+        <div class="completed-head" data-act="togglecompleted" data-p="${personId}">
+          <span class="cg-caret">▶</span>
+          <span>✓ COMPLETED</span>
+          <span class="cg-count">${completed.length}</span>
+        </div>
+        <div class="completed-body">${completed.map(d=>dateRowHTML(personId,d)).join("")}</div>
+      </div>`;
+  }
+  return `<div class="date-list">${html}</div>`;
 }
 
 // "behind" = no entry for today, OR today's entry has tasks but none complete
@@ -159,6 +180,9 @@ $("#peopleList").addEventListener("click", e=>{
     openNudge(pid);
   } else if(act==="openday"){
     openDay(pid, el.dataset.d);
+  } else if(act==="togglecompleted"){
+    state.completedOpen[pid] = !state.completedOpen[pid];
+    renderPeople();
   }
 });
 
