@@ -373,7 +373,11 @@ $("#nudgeSend").addEventListener("click", async ()=>{
     });
     toast(`Nudge sent to ${nudgeTarget.name}.`);
     nudgeModal.classList.add("hidden");
-  }catch(e){ console.error(e); toast("Email failed to send. Check EmailJS config.", true); }
+  }catch(e){
+    console.error("EmailJS error:", e);
+    const detail = (e && (e.text || e.message)) ? `${e.status||""} ${e.text||e.message}`.trim() : "unknown error";
+    toast(`Email failed: ${detail}`, true);
+  }
   finally{ btn.disabled=false; btn.textContent="▸ SEND NUDGE"; }
 });
 
