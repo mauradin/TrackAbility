@@ -198,6 +198,7 @@ async function persistDay(){
    ===================================================================== */
 function openDay(personId, date){
   state.selPerson=personId; state.selDate=date;
+  maybeCloseDrawer();
   if(state.daySub){ state.daySub(); state.daySub=null; }
   $("#welcome").classList.add("hidden");
   $("#dayView").classList.remove("hidden");
@@ -384,6 +385,23 @@ $("#nudgeSend").addEventListener("click", async ()=>{
 /* close modals on backdrop click / Esc */
 [personModal,nudgeModal].forEach(m=>m.addEventListener("click", e=>{ if(e.target===m) m.classList.add("hidden"); }));
 document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ personModal.classList.add("hidden"); nudgeModal.classList.add("hidden"); }});
+
+/* =====================================================================
+   SIDEBAR COLLAPSE  (desktop slide-away + mobile drawer)
+   ===================================================================== */
+const isMobile = () => window.matchMedia("(max-width:760px)").matches;
+function setNav(collapsed, remember=true){
+  document.body.classList.toggle("nav-collapsed", collapsed);
+  if(remember && !isMobile()) localStorage.setItem("ta_nav_collapsed", collapsed ? "1" : "0");
+}
+// initial state: phones start collapsed (content first); desktop restores last choice
+setNav(isMobile() ? true : localStorage.getItem("ta_nav_collapsed")==="1", false);
+
+$("#navCollapse").addEventListener("click", ()=>setNav(true));
+$("#navReopen").addEventListener("click", ()=>setNav(false));
+$("#navBackdrop").addEventListener("click", ()=>setNav(true));
+// on mobile, picking a day should close the drawer so the log is visible
+function maybeCloseDrawer(){ if(isMobile()) setNav(true, false); }
 
 /* sync indicator */
 function setSync(ok){
