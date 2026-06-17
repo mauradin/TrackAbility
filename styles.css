@@ -305,20 +305,32 @@ body.nav-collapsed .nav-reopen{display:grid}
 
 /* responsive */
 @media(max-width:820px){
-  .app{grid-template-columns:1fr}
-  /* the whole command rail becomes a slide-in drawer over the content */
+  .app{display:block;height:100dvh}
+  /* the whole command rail becomes a slide-in drawer; rails STACK vertically */
   .nav{
-    position:fixed;top:0;left:0;bottom:0;z-index:45;width:min(92vw,470px);
-    transform:translateX(0);box-shadow:14px 0 40px rgba(0,0,0,.6);
+    position:fixed;top:0;left:0;bottom:0;z-index:45;width:min(86vw,340px);
+    flex-direction:column;transform:translateX(0);box-shadow:14px 0 40px rgba(0,0,0,.6);
   }
-  .rail-ops{flex:0 0 50%;width:50%}
-  .rail-dates{flex:1 1 50%;width:auto}
+  .rail-ops{
+    flex:0 0 auto;width:100%;max-height:48vh;border-right:none;border-bottom:1px solid var(--line);
+  }
+  .rail-dates{flex:1 1 auto;width:100%;min-height:0;border-right:none}
   body.nav-collapsed .nav{transform:translateX(-100%)}
   .nav-collapse{font-size:18px}
+
+  /* main fills the viewport; clear space for the floating menu button */
+  .main{height:100dvh}
+  .day-view{padding:64px 16px 60px}
+  .welcome{padding:0 16px}
+  .day-header{padding-bottom:14px}
   .day-actions{flex-wrap:wrap;gap:8px}
+  #dayTitle{font-size:22px}
   .kanban{grid-template-columns:1fr}
-  .day-view{padding:20px 16px 60px}
-  /* backdrop only while the drawer is open on mobile */
+
+  /* floating menu button — bigger tap target, always reachable on mobile */
+  .nav-reopen{width:46px;height:46px;font-size:20px}
+
+  /* backdrop only while the drawer is open */
   .nav-backdrop{
     position:fixed;inset:0;z-index:44;background:rgba(3,6,12,.6);backdrop-filter:blur(2px);
   }

@@ -17,10 +17,10 @@
 
   <!-- floating reopen button (shown when nav collapsed) -->
   <button id="navReopen" class="nav-reopen" title="Show command rail" aria-label="Show command rail">☰</button>
-  <!-- mobile drawer backdrop -->
-  <div id="navBackdrop" class="nav-backdrop" aria-hidden="true"></div>
 
   <div class="app">
+    <!-- mobile drawer backdrop (inside .app so it shares the drawer's stacking context) -->
+    <div id="navBackdrop" class="nav-backdrop" aria-hidden="true"></div>
     <!-- ================= COMMAND RAIL (two columns) ================= -->
     <div class="nav">
       <!-- TIER 1: operatives -->

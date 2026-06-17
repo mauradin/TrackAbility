@@ -130,12 +130,13 @@ $("#peopleList").addEventListener("click", e=>{
   selectPerson(el.dataset.p);
 });
 
-async function selectPerson(personId){
+function selectPerson(personId){
   state.selPerson = personId;
   renderOps();
-  const today = await ensureToday(personId);   // auto-create today if missing
+  const today = estTodayStr();
+  openDay(personId, today);                     // open immediately (optimistic)
   renderDateList();
-  openDay(personId, today);
+  ensureToday(personId).catch(e=>console.error("ensureToday failed", e));  // create in background
 }
 
 /* =====================================================================
