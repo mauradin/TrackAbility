@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TrackAbility // Accountability Command</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@500;600;700;800&family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- atmosphere layers -->
+  <div class="bg-hex" aria-hidden="true"></div>
+  <div class="bg-scanlines" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <div class="app">
+    <!-- ================= SIDEBAR ================= -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">◢◤</div>
+        <div class="brand-text">
+          <h1>TRACK<span>ABILITY</span></h1>
+          <p>ACCOUNTABILITY COMMAND</p>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="section-label">
+          <span>OPERATIVES</span>
+          <button id="addPersonBtn" class="mini-btn" title="Add operative">+</button>
+        </div>
+        <div id="peopleList" class="people-list"><!-- people injected here --></div>
+      </div>
+
+      <div class="sidebar-foot">
+        <span id="syncDot" class="sync-dot offline"></span>
+        <span id="syncText">CONNECTING…</span>
+      </div>
+    </aside>
+
+    <!-- ================= MAIN ================= -->
+    <main class="main">
+      <!-- empty / welcome state -->
+      <section id="welcome" class="welcome">
+        <div class="welcome-inner">
+          <div class="welcome-glyph">◢◤</div>
+          <h2>STANDING BY</h2>
+          <p>Select an operative and a date from the command rail,<br/>or deploy a new log entry to begin tracking.</p>
+        </div>
+      </section>
+
+      <!-- active day view -->
+      <section id="dayView" class="day-view hidden">
+        <header class="day-header">
+          <div class="day-meta">
+            <div class="crumb">
+              <span id="crumbPerson" class="crumb-person">—</span>
+              <span class="crumb-sep">/</span>
+              <span id="crumbDate" class="crumb-date">—</span>
+            </div>
+            <h2 id="dayTitle">DAILY LOG</h2>
+          </div>
+          <div class="day-actions">
+            <div class="view-toggle" role="tablist">
+              <button class="view-btn active" data-view="list">▤ LIST</button>
+              <button class="view-btn" data-view="kanban">▦ KANBAN</button>
+            </div>
+          </div>
+        </header>
+
+        <!-- task entry -->
+        <div class="task-entry">
+          <input id="taskInput" type="text" placeholder="What did you accomplish? Log an objective…" maxlength="240" />
+          <button id="addTaskBtn" class="primary-btn">▸ LOG</button>
+        </div>
+
+        <!-- LIST view -->
+        <div id="listView" class="task-list"></div>
+
+        <!-- KANBAN view -->
+        <div id="kanbanView" class="kanban hidden">
+          <div class="kan-col" data-status="todo">
+            <div class="kan-head"><span class="dot todo"></span>QUEUED <em data-count></em></div>
+            <div class="kan-body" data-drop="todo"></div>
+          </div>
+          <div class="kan-col" data-status="doing">
+            <div class="kan-head"><span class="dot doing"></span>IN PROGRESS <em data-count></em></div>
+            <div class="kan-body" data-drop="doing"></div>
+          </div>
+          <div class="kan-col" data-status="done">
+            <div class="kan-head"><span class="dot done"></span>COMPLETE <em data-count></em></div>
+            <div class="kan-body" data-drop="done"></div>
+          </div>
+        </div>
+
+        <!-- mission note -->
+        <div class="note-block">
+          <div class="note-label">
+            <span>◈ MISSION NOTE</span>
+            <span id="noteStatus" class="note-status">saved</span>
+          </div>
+          <textarea id="noteArea" placeholder="Free-form notes for the day — reflections, blockers, wins…"></textarea>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ================= MODAL: add person ================= -->
+  <div id="personModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">DEPLOY OPERATIVE</div>
+      <label>Call sign / Name
+        <input id="personName" type="text" placeholder="e.g. Jesse" maxlength="40" />
+      </label>
+      <label>Email <small>(for accountability nudges)</small>
+        <input id="personEmail" type="email" placeholder="name@example.com" />
+      </label>
+      <div class="modal-actions">
+        <button id="personCancel" class="ghost-btn">CANCEL</button>
+        <button id="personSave" class="primary-btn">DEPLOY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: nudge ================= -->
+  <div id="nudgeModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head alert">▲ ACCOUNTABILITY NUDGE</div>
+      <p id="nudgeSummary" class="nudge-summary"></p>
+      <label>Message
+        <textarea id="nudgeMsg" rows="4"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button id="nudgeCancel" class="ghost-btn">CANCEL</button>
+        <button id="nudgeSend" class="primary-btn alert">▸ SEND NUDGE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Firebase + EmailJS SDKs -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

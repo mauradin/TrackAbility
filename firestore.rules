@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// =====================================================================
+// TrackAbility Firestore rules
+// No authentication by design — this app is meant for a private,
+// URL-shared tracker between two people. These rules allow open
+// read/write to the database. Anyone who knows the project ID could
+// technically read/write, so do NOT store anything sensitive here.
+// =====================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // people + their nested days subcollection
+    match /people/{personId} {
+      allow read, write: if true;
+
+      match /days/{dayId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}
