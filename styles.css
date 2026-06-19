@@ -413,15 +413,35 @@ body.nav-collapsed .nav-reopen{display:grid}
   .nav-collapse{font-size:18px}
 
   /* main fills the viewport; clear space for the floating menu button */
-  .main{height:100dvh}
-  .day-view{padding:64px 16px 60px}
-  .feed-view{padding:64px 16px 60px}
+  .main{height:100dvh;overflow-x:hidden}
+  html,body{overflow-x:hidden}
+  .day-view,.feed-view{padding:64px 16px 60px;max-width:100%}
   .welcome{padding:0 16px}
-  .day-header{padding-bottom:14px}
-  .day-actions{flex-wrap:wrap;gap:8px}
+
+  /* day header: title then full-width actions, no overflow */
+  .day-header{padding-bottom:14px;align-items:flex-start}
+  .day-actions{flex-wrap:wrap;gap:8px;width:100%}
+  .view-toggle{flex:1}
+  .view-btn{flex:1;text-align:center;padding:11px 10px}
+  .nudge-btn{padding:11px 16px}
   #dayTitle{font-size:22px}
   .kanban{grid-template-columns:1fr}
   .op-del{opacity:.6}            /* no hover on touch — keep it reachable */
+
+  /* tasks: bigger touch targets; drag grip hidden (HTML5 DnD is mouse-only) */
+  .task{gap:11px;padding:13px 12px}
+  .task-grip{display:none}
+  .task-text{font-size:14px;min-width:0;word-break:break-word}
+  .task-time{display:flex;margin-left:0;margin-top:5px;flex-wrap:wrap}
+  .check{width:26px;height:26px}
+  .status-pill{padding:6px 10px}
+  .task-del{font-size:22px;padding:0 6px}
+
+  /* feed composer: comfortable tap controls */
+  .feed-compose-actions{gap:8px}
+  .feed-img-btn{padding:10px 14px}
+  .primary-btn.sm,.ghost-btn.sm{padding:10px 14px}
+  .feed-img-preview img{max-width:100%}
 
   /* floating menu button — bigger tap target, always reachable on mobile */
   .nav-reopen{width:46px;height:46px;font-size:20px}
