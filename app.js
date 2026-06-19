@@ -586,12 +586,15 @@ document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ personModal.clas
 const MAX_DAY_BYTES = 950000;   // Firestore caps a document at ~1 MiB
 let pendingFeedImg = null;      // staged data-URI awaiting POST
 
+// Stored feed images are untrusted (no-auth DB). Only render a strict, fully
+// base64 data-URI — this prevents an attribute breakout / onerror injection.
+const SAFE_IMG = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/;
 function renderFeed(){
   const list=$("#feedList");
   const feed=[...(state.curDay.feed||[])].sort((a,b)=>(b.ts||0)-(a.ts||0)); // newest first
   if(!feed.length){ list.innerHTML=`<div class="feed-empty">No posts yet — drop a note or image above.</div>`; return; }
   list.innerHTML = feed.map(f=>{
-    const img = (f.image && f.image.startsWith("data:image/"))
+    const img = (f.image && SAFE_IMG.test(f.image))
       ? `<img class="feed-img" src="${f.image}" alt="feed image" loading="lazy">` : "";
     const txt = f.text ? `<div class="feed-text">${esc(f.text)}</div>` : "";
     return `<div class="feed-item" data-id="${f.id}">
