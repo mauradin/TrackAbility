@@ -14,7 +14,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getFirestore, collection, doc, setDoc, onSnapshot,
-  serverTimestamp, query, orderBy, getDocs, writeBatch
+  serverTimestamp, query, orderBy, getDocs, writeBatch, deleteDoc, limit
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const CFG = window.APP_CONFIG;
@@ -31,6 +31,10 @@ try {
   }
 } catch (e) { console.warn("EmailJS init failed", e); }
 
+/* the public forum is stored under a reserved "person" id so it rides the
+   existing Firestore rules; it is hidden from the operatives list. */
+const FORUM_ID = "__dayfeed__";
+
 /* ---------- state ---------- */
 const state = {
   people: [],                 // [{id,name,email}]
@@ -40,7 +44,10 @@ const state = {
   selPerson: null,            // personId
   selDate: null,              // 'YYYY-MM-DD'
   curDay: null,               // active day doc data
-  view: "list"
+  view: "list",
+  screen: "feed",             // "feed" (public forum, default home) | "day"
+  forum: [],                  // public feed posts (newest-first)
+  forumSub: null              // forum listener unsubscribe
 };
 
 /* ---------- helpers ---------- */
@@ -49,9 +56,13 @@ const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 const esc = s => (s??"").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const initials = n => (n||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
 const uid = () => "t" + Math.random().toString(36).slice(2,9) + (performance.now()|0).toString(36);
-// Which bucket a task lives in. Carried-over tasks sit in "backlog" until done,
-// at which point completion clears the flag and they move to the normal "done" bucket.
-const taskBucket = t => (t.backlog && t.status!=="done") ? "backlog" : (t.status||"todo");
+// Which bucket a task lives in. "backlog" is a normal, freely-movable status;
+// the legacy `backlog:true` flag (from older docs) is still honored for compat.
+const taskBucket = t => {
+  if(t.status === "backlog") return "backlog";
+  if(t.backlog && t.status !== "done") return "backlog";   // legacy flag
+  return t.status || "todo";
+};
 
 // "today" anchored to America/New_York (EST/EDT) -> YYYY-MM-DD
 function estTodayStr(){
@@ -68,6 +79,11 @@ function fmtTime(ms){
   if(!ms) return "";
   return new Date(ms).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});
 }
+// epoch-ms -> date + time for the cross-day forum, e.g. "Jun 19, 2:14 PM"
+function fmtStamp(ms){
+  if(!ms) return "";
+  return new Date(ms).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+}
 let toastT;
 function toast(msg, isErr=false){
   const t=$("#toast"); t.textContent=msg; t.className="toast"+(isErr?" err":"");
@@ -80,6 +96,7 @@ function toast(msg, isErr=false){
 onSnapshot(collection(db,"people"),
   snap => {
     state.people = snap.docs.map(d=>({id:d.id, ...d.data()}))
+                       .filter(p=>p.id!==FORUM_ID)   // the forum is not an operative
                        .sort((a,b)=>(a.name||"").localeCompare(b.name||""));
     state.people.forEach(p => subscribeDays(p.id));
     renderOps();
@@ -118,7 +135,7 @@ function renderOps(){
     return;
   }
   wrap.innerHTML = state.people.map(p=>{
-    const sel = state.selPerson===p.id;
+    const sel = state.screen!=="feed" && state.selPerson===p.id;
     const days = state.daysByPerson[p.id]||[];
     const behind = isBehind(p.id);
     const flag = behind
@@ -164,9 +181,8 @@ async function deletePerson(personId){
   if(state.selPerson===personId){
     if(state.daySub){ state.daySub(); state.daySub=null; }
     state.selPerson=null; state.selDate=null; state.curDay=null;
-    $("#dayView").classList.add("hidden");
-    $("#welcome").classList.remove("hidden");
     renderDateList();
+    showFeed();   // fall back to the public feed
   }
 }
 
@@ -230,8 +246,8 @@ function carryForwardBacklog(personId, todayId){
   const prev = days.find(d => d.id < todayId);        // most recent earlier day
   if(!prev) return [];
   return (prev.tasks||[])
-    .filter(t => t.status !== "done")
-    .map(t => ({ id: uid(), text: t.text, status: "todo", backlog: true,
+    .filter(t => taskBucket(t) !== "done")
+    .map(t => ({ id: uid(), text: t.text, status: "backlog",
                  createdAt: Date.now(), completedAt: null }));
 }
 
@@ -257,31 +273,22 @@ async function persistDay(){
   }, { merge:true });
 }
 
-// feed lives in the same day doc but is written separately (merge) so a task
-// toggle never re-uploads images, and a feed post never touches the tasks.
-async function persistFeed(){
-  if(!state.selPerson||!state.selDate) return;
-  await setDoc(doc(db,"people",state.selPerson,"days",state.selDate),{
-    date: state.selDate,
-    feed: state.curDay.feed||[],
-    updatedAt: serverTimestamp()
-  }, { merge:true });
-}
-
 /* =====================================================================
    DAY VIEW
    ===================================================================== */
 function openDay(personId, date){
-  state.selPerson=personId; state.selDate=date;
+  state.selPerson=personId; state.selDate=date; state.screen="day";
   maybeCloseDrawer();
   if(state.daySub){ state.daySub(); state.daySub=null; }
+  $("#feedNav").classList.remove("active");
+  $("#feedView").classList.add("hidden");
   $("#welcome").classList.add("hidden");
   $("#dayView").classList.remove("hidden");
   renderDateList(); // refresh active highlight
 
   const ref=doc(db,"people",personId,"days",date);
   state.daySub = onSnapshot(ref, snap=>{
-    state.curDay = snap.exists() ? snap.data() : { date, note:"", tasks:[], feed:[] };
+    state.curDay = snap.exists() ? snap.data() : { date, note:"", tasks:[] };
     renderDay();
     renderOps();
     renderDateList();
@@ -298,7 +305,6 @@ function renderDay(){
   if(document.activeElement!==noteEl) noteEl.value = state.curDay.note||"";
 
   if(state.view==="list") renderList(); else renderKanban();
-  renderFeed();
 }
 
 // created / completed stamps shown subtly on each task
@@ -308,22 +314,14 @@ function taskStamp(t){
   return (made||done) ? `<span class="task-time">${made}${done}</span>` : "";
 }
 function taskRow(t){
-  if(taskBucket(t)==="backlog"){
-    // Carried-over: locked to the backlog bucket. Can be completed or removed,
-    // but not dragged or reclassified into today's working buckets.
-    return `<div class="task backlog" data-status="${t.status}" data-id="${t.id}">
-      <span class="task-grip locked" title="Carried over — locked to backlog" aria-hidden="true">⟳</span>
-      <div class="check" data-act="check">✓</div>
-      <div class="task-text">${esc(t.text)}${taskStamp(t)}</div>
-      <span class="status-pill is-backlog" title="Carried over from a previous day">BACKLOG</span>
-      <button class="task-del" data-act="del" title="Remove">×</button>
-    </div>`;
-  }
-  return `<div class="task" draggable="true" data-status="${t.status}" data-id="${t.id}">
+  const bucket=taskBucket(t);
+  // backlog is just another status now — fully draggable, and the pill cycles
+  // through it like any other bucket.
+  return `<div class="task${bucket==="backlog"?" backlog":""}" draggable="true" data-status="${bucket}" data-id="${t.id}">
       <span class="task-grip" title="Drag to reorder" aria-hidden="true">⠿</span>
       <div class="check" data-act="check">✓</div>
       <div class="task-text">${esc(t.text)}${taskStamp(t)}</div>
-      <button class="status-pill" data-act="cycle">${(t.status||"todo").toUpperCase()}</button>
+      <button class="status-pill${bucket==="backlog"?" backlog":""}" data-act="cycle" title="Click to change status">${bucket.toUpperCase()}</button>
       <button class="task-del" data-act="del" title="Remove">×</button>
     </div>`;
 }
@@ -334,16 +332,7 @@ function renderList(){
   const tasks=state.curDay.tasks||[];
   const wrap=$("#listView");
   if(!tasks.length){ wrap.innerHTML=`<div class="empty-tasks">No objectives logged for this day. Add one above.</div>`; return; }
-  const backlog = tasks.filter(t=>taskBucket(t)==="backlog");
-  const active  = tasks.filter(t=>taskBucket(t)!=="backlog");   // rendered in stored order (drag-reorderable)
-  let html="";
-  if(backlog.length){
-    html += `<div class="list-group-label backlog">⟳ BACKLOG — carried over, clear it or it rolls again</div>`;
-    html += backlog.map(taskRow).join("");
-    if(active.length) html += `<div class="list-group-label">TODAY</div>`;
-  }
-  html += active.map(taskRow).join("");
-  wrap.innerHTML = html;
+  wrap.innerHTML = tasks.map(taskRow).join("");   // flat, stored order (drag-reorderable)
 }
 
 function kanStamp(t){
@@ -355,20 +344,7 @@ function renderKanban(){
   $("#listView").classList.add("hidden");
   $("#kanbanView").classList.remove("hidden");
   const tasks=state.curDay.tasks||[];
-
-  // Backlog column — locked cards: complete (✓) or remove only, never dragged out.
-  const backlog=tasks.filter(t=>taskBucket(t)==="backlog");
-  const bbody=$('.kan-body[data-bucket="backlog"]');
-  $('.kan-col[data-status="backlog"] [data-count]').textContent=backlog.length;
-  bbody.innerHTML = backlog.map(t=>`
-    <div class="kan-card backlog" data-id="${t.id}">
-      ${esc(t.text)}
-      ${kanStamp(t)}
-      <button class="kc-check" data-act="check" data-id="${t.id}" title="Mark complete">✓</button>
-      <button class="kc-del" data-act="del" data-id="${t.id}" title="Remove">×</button>
-    </div>`).join("");
-
-  ["todo","doing","done"].forEach(stat=>{
+  ["backlog","todo","doing","done"].forEach(stat=>{
     const body=$(`.kan-body[data-drop="${stat}"]`);
     const col=tasks.filter(t=>taskBucket(t)===stat);
     $(`.kan-col[data-status="${stat}"] [data-count]`).textContent=col.length;
@@ -388,22 +364,20 @@ function addTask(text){
   setTasks(ts=>[...ts,{id:uid(),text:text.trim(),status:"todo",createdAt:Date.now(),completedAt:null}]);
 }
 function delTask(id){ setTasks(ts=>ts.filter(t=>t.id!==id)); }
-// stamp completedAt whenever a task lands in "done"; clear it when it leaves
+// stamp completedAt whenever a task lands in "done"; clear it when it leaves.
+// Also drops the legacy `backlog` flag — status is now the single source of truth.
 function setStatus(id,status){
   setTasks(ts=>ts.map(t=>t.id!==id ? t
-    : {...t, status, completedAt: status==="done" ? (t.completedAt||Date.now()) : null}));
+    : {...t, status, backlog:false, completedAt: status==="done" ? (t.completedAt||Date.now()) : null}));
 }
 function cycleStatus(id){
   const cur=(state.curDay.tasks||[]).find(t=>t.id===id);
-  if(cur?.backlog && cur.status!=="done") return;   // backlog tasks are locked out of the working buckets
-  setStatus(id, {todo:"doing",doing:"done",done:"todo"}[cur?.status||"todo"]);
+  const next={backlog:"todo",todo:"doing",doing:"done",done:"backlog"};
+  setStatus(id, next[taskBucket(cur||{})] || "todo");
 }
 function toggleDone(id){
   const cur=(state.curDay.tasks||[]).find(t=>t.id===id);
-  const done = cur?.status==="done";
-  // Completing a backlog task clears its flag so it moves into the COMPLETE bucket.
-  setTasks(ts=>ts.map(t=>t.id!==id ? t
-    : {...t, status: done?"todo":"done", backlog:false, completedAt: done?null:Date.now()}));
+  setStatus(id, taskBucket(cur||{})==="done" ? "todo" : "done");
 }
 
 /* list interactions */
@@ -415,18 +389,17 @@ $("#listView").addEventListener("click", e=>{
   else if(el.dataset.act==="del") delTask(id);
 });
 
-/* list drag-to-reorder — rewrites the stored sequence of the active (non-backlog) tasks */
-function reorderActiveByIds(ids){
+/* list drag-to-reorder — rewrites the stored task sequence */
+function reorderByIds(ids){
   setTasks(ts=>{
-    const backlog=ts.filter(t=>taskBucket(t)==="backlog");
     const byId=new Map(ts.map(t=>[t.id,t]));
-    const active=ids.map(id=>byId.get(id)).filter(t=>t && taskBucket(t)!=="backlog");
-    ts.forEach(t=>{ if(taskBucket(t)!=="backlog" && !ids.includes(t.id)) active.push(t); }); // safety
-    return [...backlog, ...active];
+    const next=ids.map(id=>byId.get(id)).filter(Boolean);
+    ts.forEach(t=>{ if(!ids.includes(t.id)) next.push(t); }); // safety: keep any stragglers
+    return next;
   });
 }
 function dragAfterTask(container, y){
-  const els=[...container.querySelectorAll(".task:not(.dragging):not(.backlog)")];
+  const els=[...container.querySelectorAll(".task:not(.dragging)")];
   return els.reduce((closest, el)=>{
     const box=el.getBoundingClientRect();
     const offset=y - box.top - box.height/2;
@@ -435,7 +408,7 @@ function dragAfterTask(container, y){
 }
 let listDragId=null;
 $("#listView").addEventListener("dragstart", e=>{
-  const t=e.target.closest(".task"); if(!t || t.classList.contains("backlog")) return;
+  const t=e.target.closest(".task"); if(!t) return;
   listDragId=t.dataset.id; t.classList.add("dragging");
   e.dataTransfer.effectAllowed="move";
 });
@@ -450,9 +423,9 @@ $("#listView").addEventListener("dragover", e=>{
 $("#listView").addEventListener("drop", e=>{
   if(!listDragId) return;
   e.preventDefault();
-  const ids=$$("#listView .task:not(.backlog)").map(el=>el.dataset.id);
+  const ids=$$("#listView .task").map(el=>el.dataset.id);
   listDragId=null;
-  reorderActiveByIds(ids); // persists; live snapshot re-renders the canonical order
+  reorderByIds(ids); // persists; live snapshot re-renders the canonical order
 });
 $("#listView").addEventListener("dragend", e=>{
   e.target.closest(".task")?.classList.remove("dragging");
@@ -467,7 +440,7 @@ $("#kanbanView").addEventListener("click", e=>{
 });
 let dragId=null;
 $("#kanbanView").addEventListener("dragstart", e=>{
-  const card=e.target.closest(".kan-card"); if(!card || card.classList.contains("backlog")) return;
+  const card=e.target.closest(".kan-card"); if(!card) return;
   dragId=card.dataset.id; card.classList.add("dragging");
 });
 $("#kanbanView").addEventListener("dragend", e=>{
@@ -580,19 +553,31 @@ $("#nudgeSend").addEventListener("click", async ()=>{
 document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ personModal.classList.add("hidden"); nudgeModal.classList.add("hidden"); }});
 
 /* =====================================================================
-   DAY FEED — text + image wall, stored on the day doc (merge writes so it
-   never collides with task/note saves). Images are downscaled client-side.
+   DAY FEED — a single PUBLIC forum shared across every operative.
+   Each post is its own doc under people/<FORUM_ID>/days, so the wall scales
+   past the 1 MB single-document limit and stays live for everyone.
+   FORUM_ID is filtered out of the operatives list (see people snapshot).
    ===================================================================== */
-const MAX_DAY_BYTES = 950000;   // Firestore caps a document at ~1 MiB
+const MAX_IMG_BYTES = 950000;   // a single post doc must stay under ~1 MiB
 let pendingFeedImg = null;      // staged data-URI awaiting POST
 
 // Stored feed images are untrusted (no-auth DB). Only render a strict, fully
 // base64 data-URI — this prevents an attribute breakout / onerror injection.
 const SAFE_IMG = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/;
-function renderFeed(){
-  const list=$("#feedList");
-  const feed=[...(state.curDay.feed||[])].sort((a,b)=>(b.ts||0)-(a.ts||0)); // newest first
-  if(!feed.length){ list.innerHTML=`<div class="feed-empty">No posts yet — drop a note or image above.</div>`; return; }
+const forumCol = () => collection(db,"people",FORUM_ID,"days");
+
+function subscribeForum(){
+  if(state.forumSub) return;
+  const q=query(forumCol(), orderBy("ts","desc"), limit(60));   // cap history we load
+  state.forumSub = onSnapshot(q,
+    snap=>{ state.forum = snap.docs.map(d=>({id:d.id, ...d.data()})); renderForum(); },
+    err=>console.error("forum sync", err));
+}
+
+function renderForum(){
+  const list=$("#feedList"); if(!list) return;
+  const feed=state.forum||[];   // already newest-first from the query
+  if(!feed.length){ list.innerHTML=`<div class="feed-empty">Nothing here yet — be the first to post.</div>`; return; }
   list.innerHTML = feed.map(f=>{
     const img = (f.image && SAFE_IMG.test(f.image))
       ? `<img class="feed-img" src="${f.image}" alt="feed image" loading="lazy">` : "";
@@ -600,7 +585,7 @@ function renderFeed(){
     return `<div class="feed-item" data-id="${f.id}">
       <div class="feed-meta">
         <span class="feed-author">${esc(f.author||"—")}</span>
-        <span class="feed-ts">${fmtTime(f.ts)}</span>
+        <span class="feed-ts">${fmtStamp(f.ts)}</span>
         <button class="feed-del" data-act="feeddel" data-id="${f.id}" title="Remove">×</button>
       </div>
       ${img}${txt}
@@ -608,9 +593,6 @@ function renderFeed(){
   }).join("");
 }
 
-function approxDayBytes(extra=""){
-  try{ return JSON.stringify(state.curDay||{}).length + (extra?extra.length:0); }catch(e){ return 0; }
-}
 function compressImage(file, maxDim=1100, quality=0.62){
   return new Promise((resolve,reject)=>{
     const fr=new FileReader();
@@ -645,33 +627,29 @@ function clearStagedImage(){
   pendingFeedImg=null;
   const prev=$("#feedImgPreview"); prev.innerHTML=""; prev.classList.add("hidden");
 }
-async function postFeed(){
-  if(!state.selPerson||!state.selDate){ toast("Open a day first.", true); return; }
+async function postForum(){
   const text=$("#feedText").value.trim();
   if(!text && !pendingFeedImg) return;
-  if(pendingFeedImg && approxDayBytes(pendingFeedImg) > MAX_DAY_BYTES){
-    toast("This day's feed is full — delete an older image first.", true); return;
-  }
-  const item={ id:uid(), text, image:pendingFeedImg||"", author:CFG.myName||"Anon", ts:Date.now() };
-  state.curDay.feed=[...(state.curDay.feed||[]), item];
+  if(pendingFeedImg && pendingFeedImg.length > MAX_IMG_BYTES){ toast("That image is too large — try a smaller one.", true); return; }
+  const img=pendingFeedImg;
   $("#feedText").value=""; clearStagedImage();
-  renderFeed();
-  try{ await persistFeed(); }
-  catch(e){ console.error(e); toast("Post failed — image may be too large.", true); }
+  try{
+    await setDoc(doc(db,"people",FORUM_ID,"days",uid()),
+      { text, image:img||"", author:CFG.myName||"Anon", ts:Date.now(), createdAt:serverTimestamp() });
+  }catch(e){ console.error(e); toast("Post failed — image may be too large.", true); }
 }
-function delFeed(id){
-  state.curDay.feed=(state.curDay.feed||[]).filter(f=>f.id!==id);
-  renderFeed();
-  persistFeed().catch(e=>console.error(e));
+async function delForum(id){
+  try{ await deleteDoc(doc(db,"people",FORUM_ID,"days",id)); }
+  catch(e){ console.error(e); toast("Delete failed.", true); }
 }
 
 /* feed wiring */
-$("#feedPost").addEventListener("click", postFeed);
-$("#feedText").addEventListener("keydown", e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)) postFeed(); });
+$("#feedPost").addEventListener("click", postForum);
+$("#feedText").addEventListener("keydown", e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)) postForum(); });
 $("#feedImg").addEventListener("change", e=>{ if(e.target.files[0]) stageImage(e.target.files[0]); e.target.value=""; });
 $("#feedImgPreview").addEventListener("click", e=>{ if(e.target.id==="feedImgClear") clearStagedImage(); });
 $("#feedList").addEventListener("click", e=>{
-  const del=e.target.closest('[data-act="feeddel"]'); if(del) delFeed(del.dataset.id);
+  const del=e.target.closest('[data-act="feeddel"]'); if(del) delForum(del.dataset.id);
 });
 const feedCompose=$("#feedCompose");
 ["dragover","dragenter"].forEach(ev=>feedCompose.addEventListener(ev, e=>{ e.preventDefault(); feedCompose.classList.add("drop-hot"); }));
@@ -686,28 +664,47 @@ $("#feedText").addEventListener("paste", e=>{
   if(item){ e.preventDefault(); stageImage(item.getAsFile()); }
 });
 
-/* push the day's feed to the operative by email (reuses sendEmail) */
+/* show the forum (home / default screen) */
+function showFeed(){
+  state.screen="feed";
+  maybeCloseDrawer();
+  $("#welcome").classList.add("hidden");
+  $("#dayView").classList.add("hidden");
+  $("#feedView").classList.remove("hidden");
+  $("#feedNav").classList.add("active");
+  renderOps();          // drop the operative highlight while on the feed
+  renderForum();
+}
+$("#feedNav").addEventListener("click", showFeed);
+
+/* broadcast the latest feed to every operative with an email (reuses sendEmail) */
 $("#feedPushBtn").addEventListener("click", async ()=>{
-  const p=state.people.find(x=>x.id===state.selPerson); if(!p) return;
-  if(!p.email){ toast(`${p.name} has no email on file.`, true); return; }
   if(!emailReady){ toast("EmailJS not configured yet (need Service ID).", true); return; }
-  const feed=[...(state.curDay.feed||[])].sort((a,b)=>(a.ts||0)-(b.ts||0));
+  const recipients=state.people.filter(p=>p.email);
+  if(!recipients.length){ toast("No operatives have an email on file.", true); return; }
+  const feed=[...(state.forum||[])].sort((a,b)=>(a.ts||0)-(b.ts||0)).slice(-25);
   if(!feed.length){ toast("Nothing in the feed to push yet.", true); return; }
+  if(!confirm(`Email the latest ${feed.length} feed post(s) to all ${recipients.length} operative(s) with an address?`)) return;
   let imgs=0;
   const lines=feed.map(f=>{
     if(f.image) imgs++;
     const body=f.text || (f.image ? "[image]" : "");
-    return `• ${fmtTime(f.ts)} — ${f.author||"—"}: ${body}${f.text&&f.image?" [+image]":""}`;
+    return `• ${fmtStamp(f.ts)} — ${f.author||"—"}: ${body}${f.text&&f.image?" [+image]":""}`;
   });
   const note=imgs ? `\n\n(${imgs} image${imgs>1?"s":""} posted — open TrackAbility to view.)` : "";
-  const msg=`Day feed for ${fmtDate(state.selDate)}:\n\n${lines.join("\n")}${note}`;
+  const msg=`TrackAbility — Day Feed:\n\n${lines.join("\n")}${note}`;
   const btn=$("#feedPushBtn"), lbl=btn.textContent; btn.disabled=true; btn.textContent="SENDING…";
-  try{
-    await sendEmail(p, `Day feed — ${state.selDate}`, msg);
-    toast(`Feed pushed to ${p.name}.`);
-  }catch(e){ console.error(e); toast(`Push failed: ${(e&&(e.text||e.message))||"error"}`, true); }
-  finally{ btn.disabled=false; btn.textContent=lbl; }
+  let ok=0;
+  for(const p of recipients){
+    try{ await sendEmail(p, "TrackAbility — Day Feed", msg); ok++; }
+    catch(e){ console.error("push to", p.name, e); }
+  }
+  btn.disabled=false; btn.textContent=lbl;
+  toast(`Feed pushed to ${ok}/${recipients.length} operative(s).`, ok===0);
 });
+
+subscribeForum();
+showFeed();   // public feed is the default home screen
 
 /* =====================================================================
    OPERATIVE CONTEXT MENU — right-click a row to delete

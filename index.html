@@ -34,6 +34,14 @@
           <button id="navCollapse" class="nav-collapse" title="Collapse rail" aria-label="Collapse rail">«</button>
         </div>
 
+        <div class="rail-feed-section">
+          <div id="feedNav" class="feed-nav" data-act="showfeed" title="Open the shared day feed">
+            <span class="feed-nav-ic">❖</span>
+            <span class="feed-nav-label">DAY FEED</span>
+            <span class="feed-nav-tag">FORUM</span>
+          </div>
+        </div>
+
         <div class="rail-section">
           <div class="section-label">
             <span>OPERATIVES</span>
@@ -62,13 +70,38 @@
 
     <!-- ================= MAIN ================= -->
     <main class="main">
-      <!-- empty / welcome state -->
-      <section id="welcome" class="welcome">
+      <!-- empty / welcome state (unused; feed is the default home) -->
+      <section id="welcome" class="welcome hidden">
         <div class="welcome-inner">
           <div class="welcome-glyph">◢◤</div>
           <h2>STANDING BY</h2>
           <p>Select an operative from the command rail.<br/>Today's log opens automatically.</p>
         </div>
+      </section>
+
+      <!-- public day feed (default home screen) -->
+      <section id="feedView" class="feed-view">
+        <header class="day-header">
+          <div class="day-meta">
+            <div class="crumb"><span class="crumb-person">SHARED</span><span class="crumb-sep">/</span><span class="crumb-date">OPEN FORUM</span></div>
+            <h2>DAY FEED</h2>
+          </div>
+          <div class="day-actions">
+            <button id="feedPushBtn" class="ghost-btn sm" title="Email the latest feed to all operatives">▲ PUSH TO ALL</button>
+          </div>
+        </header>
+
+        <div id="feedCompose" class="feed-compose">
+          <textarea id="feedText" placeholder="Post to the shared feed — drop a note, paste or drag an image…  (Ctrl/⌘+Enter to post)"></textarea>
+          <div id="feedImgPreview" class="feed-img-preview hidden"></div>
+          <div class="feed-compose-actions">
+            <label class="feed-img-btn" title="Attach image">🖼 IMAGE
+              <input id="feedImg" type="file" accept="image/*" hidden />
+            </label>
+            <button id="feedPost" class="primary-btn sm">▸ POST</button>
+          </div>
+        </div>
+        <div id="feedList" class="feed-list"></div>
       </section>
 
       <!-- active day view -->
@@ -104,7 +137,7 @@
         <div id="kanbanView" class="kanban hidden">
           <div class="kan-col backlog" data-status="backlog">
             <div class="kan-head"><span class="dot backlog"></span>BACKLOG <em data-count></em></div>
-            <div class="kan-body" data-bucket="backlog"></div>
+            <div class="kan-body" data-drop="backlog"></div>
           </div>
           <div class="kan-col" data-status="todo">
             <div class="kan-head"><span class="dot todo"></span>QUEUED <em data-count></em></div>
@@ -127,25 +160,6 @@
             <span id="noteStatus" class="note-status">saved</span>
           </div>
           <textarea id="noteArea" placeholder="Free-form notes for the day — reflections, blockers, wins…"></textarea>
-        </div>
-
-        <!-- day feed wall -->
-        <div class="feed-block">
-          <div class="feed-label">
-            <span>◈ DAY FEED</span>
-            <button id="feedPushBtn" class="ghost-btn sm" title="Email this feed to the operative">▲ PUSH FEED</button>
-          </div>
-          <div id="feedCompose" class="feed-compose">
-            <textarea id="feedText" placeholder="Drop a note, paste or drag an image here…  (Ctrl/⌘+Enter to post)"></textarea>
-            <div id="feedImgPreview" class="feed-img-preview hidden"></div>
-            <div class="feed-compose-actions">
-              <label class="feed-img-btn" title="Attach image">🖼 IMAGE
-                <input id="feedImg" type="file" accept="image/*" hidden />
-              </label>
-              <button id="feedPost" class="primary-btn sm">▸ POST</button>
-            </div>
-          </div>
-          <div id="feedList" class="feed-list"></div>
         </div>
       </section>
     </main>
