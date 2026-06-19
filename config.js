@@ -30,7 +30,7 @@ window.APP_CONFIG = {
     // look like the accountability nudge. Create a plain template in EmailJS
     // whose body is just {{subject}} + {{message}} and put its Template ID here.
     // Leave "" to reuse the nudge template above.
-    feedTemplateId: ""
+    feedTemplateId: "template_4tn8b7k"          // DayFeedDigest
     // NOTE: your PRIVATE key is intentionally NOT here. It belongs only in
     // server-side code; putting it in the browser would let anyone send mail
     // through your account. The public key is all the browser SDK needs.

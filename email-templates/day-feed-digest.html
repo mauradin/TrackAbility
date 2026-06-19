@@ -1,0 +1,64 @@
+<!-- =====================================================================
+     TrackAbility — "Day Feed" EmailJS template (DayFeedDigest)
+     Paste this into EmailJS → Email Templates → your feed template →
+     "Edit Content" → code (</>) view. Then set, in the template settings:
+       Subject:   {{subject}}
+       To Email:  {{to_email}}
+       From Name: {{from_name}}
+     Variables used: {{subject}} {{message}} {{to_name}} {{from_name}}
+     ===================================================================== -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0;padding:0;background:#05080f;">
+  <tr>
+    <td align="center" style="padding:28px 14px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#0d1525;border:1px solid #1d3050;border-radius:6px;overflow:hidden;font-family:'Segoe UI',Tahoma,Arial,sans-serif;">
+
+        <!-- header -->
+        <tr>
+          <td style="padding:22px 26px;background:#0a0f1c;border-bottom:1px solid #1d3050;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-family:'Trebuchet MS',Arial,sans-serif;font-weight:bold;font-size:20px;letter-spacing:2px;color:#cfe3f5;">
+                  TRACK<span style="color:#34d7ff;">ABILITY</span>
+                </td>
+                <td align="right" style="font-family:'Trebuchet MS',Arial,sans-serif;font-size:11px;letter-spacing:2px;color:#b18cff;">
+                  &#10070;&nbsp;DAY&nbsp;FEED
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- violet accent bar -->
+        <tr><td style="height:3px;line-height:3px;font-size:0;background:#b18cff;">&nbsp;</td></tr>
+
+        <!-- body -->
+        <tr>
+          <td style="padding:28px 26px 8px;">
+            <p style="margin:0 0 16px;font-size:14px;color:#7b93ad;">Hi {{to_name}},</p>
+            <h1 style="margin:0 0 18px;font-family:'Trebuchet MS',Arial,sans-serif;font-size:19px;letter-spacing:1px;color:#cfe3f5;font-weight:bold;">
+              {{subject}}
+            </h1>
+
+            <!-- the feed digest; pre-wrap keeps the line breaks + bullets -->
+            <div style="white-space:pre-wrap;font-family:'Consolas','Courier New',monospace;font-size:13.5px;line-height:1.7;color:#cfe3f5;background:#111c30;border:1px solid #1d3050;border-radius:4px;padding:16px 18px;">{{message}}</div>
+          </td>
+        </tr>
+
+        <!-- footer -->
+        <tr>
+          <td style="padding:20px 26px 26px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #1d3050;">
+              <tr>
+                <td style="padding-top:16px;font-size:11px;line-height:1.6;color:#3d556e;">
+                  Posted to the shared feed and pushed by <span style="color:#7b93ad;">{{from_name}}</span> via TrackAbility.<br>
+                  Open the app to see images and reply.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
