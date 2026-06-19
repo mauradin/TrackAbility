@@ -63,6 +63,11 @@ function fmtDate(s){
   const dt=new Date(y,m-1,d);
   return dt.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric",year:"numeric"});
 }
+// epoch-ms -> short local time, e.g. "2:14 PM"
+function fmtTime(ms){
+  if(!ms) return "";
+  return new Date(ms).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});
+}
 let toastT;
 function toast(msg, isErr=false){
   const t=$("#toast"); t.textContent=msg; t.className="toast"+(isErr?" err":"");
@@ -226,7 +231,8 @@ function carryForwardBacklog(personId, todayId){
   if(!prev) return [];
   return (prev.tasks||[])
     .filter(t => t.status !== "done")
-    .map(t => ({ id: uid(), text: t.text, status: "todo", backlog: true }));
+    .map(t => ({ id: uid(), text: t.text, status: "todo", backlog: true,
+                 createdAt: Date.now(), completedAt: null }));
 }
 
 // create today's date doc if it doesn't already exist; returns today's id
@@ -242,12 +248,24 @@ async function ensureToday(personId){
 
 async function persistDay(){
   if(!state.selPerson||!state.selDate||!state.curDay) return;
+  // merge so we never clobber the day's feed (written on its own path)
   await setDoc(doc(db,"people",state.selPerson,"days",state.selDate),{
     date: state.selDate,
     note: state.curDay.note||"",
     tasks: state.curDay.tasks||[],
     updatedAt: serverTimestamp()
-  });
+  }, { merge:true });
+}
+
+// feed lives in the same day doc but is written separately (merge) so a task
+// toggle never re-uploads images, and a feed post never touches the tasks.
+async function persistFeed(){
+  if(!state.selPerson||!state.selDate) return;
+  await setDoc(doc(db,"people",state.selPerson,"days",state.selDate),{
+    date: state.selDate,
+    feed: state.curDay.feed||[],
+    updatedAt: serverTimestamp()
+  }, { merge:true });
 }
 
 /* =====================================================================
@@ -263,7 +281,7 @@ function openDay(personId, date){
 
   const ref=doc(db,"people",personId,"days",date);
   state.daySub = onSnapshot(ref, snap=>{
-    state.curDay = snap.exists() ? snap.data() : { date, note:"", tasks:[] };
+    state.curDay = snap.exists() ? snap.data() : { date, note:"", tasks:[], feed:[] };
     renderDay();
     renderOps();
     renderDateList();
@@ -280,8 +298,15 @@ function renderDay(){
   if(document.activeElement!==noteEl) noteEl.value = state.curDay.note||"";
 
   if(state.view==="list") renderList(); else renderKanban();
+  renderFeed();
 }
 
+// created / completed stamps shown subtly on each task
+function taskStamp(t){
+  const made = t.createdAt ? `<span title="Created">⊕ ${fmtTime(t.createdAt)}</span>` : "";
+  const done = t.completedAt ? `<span class="done" title="Completed">✓ ${fmtTime(t.completedAt)}</span>` : "";
+  return (made||done) ? `<span class="task-time">${made}${done}</span>` : "";
+}
 function taskRow(t){
   if(taskBucket(t)==="backlog"){
     // Carried-over: locked to the backlog bucket. Can be completed or removed,
@@ -289,7 +314,7 @@ function taskRow(t){
     return `<div class="task backlog" data-status="${t.status}" data-id="${t.id}">
       <span class="task-grip locked" title="Carried over — locked to backlog" aria-hidden="true">⟳</span>
       <div class="check" data-act="check">✓</div>
-      <div class="task-text">${esc(t.text)}</div>
+      <div class="task-text">${esc(t.text)}${taskStamp(t)}</div>
       <span class="status-pill is-backlog" title="Carried over from a previous day">BACKLOG</span>
       <button class="task-del" data-act="del" title="Remove">×</button>
     </div>`;
@@ -297,7 +322,7 @@ function taskRow(t){
   return `<div class="task" draggable="true" data-status="${t.status}" data-id="${t.id}">
       <span class="task-grip" title="Drag to reorder" aria-hidden="true">⠿</span>
       <div class="check" data-act="check">✓</div>
-      <div class="task-text">${esc(t.text)}</div>
+      <div class="task-text">${esc(t.text)}${taskStamp(t)}</div>
       <button class="status-pill" data-act="cycle">${(t.status||"todo").toUpperCase()}</button>
       <button class="task-del" data-act="del" title="Remove">×</button>
     </div>`;
@@ -321,6 +346,11 @@ function renderList(){
   wrap.innerHTML = html;
 }
 
+function kanStamp(t){
+  const made = t.createdAt ? `⊕ ${fmtTime(t.createdAt)}` : "";
+  const done = t.completedAt ? `✓ ${fmtTime(t.completedAt)}` : "";
+  return (made||done) ? `<div class="kc-time">${made}${made&&done?" · ":""}${done}</div>` : "";
+}
 function renderKanban(){
   $("#listView").classList.add("hidden");
   $("#kanbanView").classList.remove("hidden");
@@ -333,6 +363,7 @@ function renderKanban(){
   bbody.innerHTML = backlog.map(t=>`
     <div class="kan-card backlog" data-id="${t.id}">
       ${esc(t.text)}
+      ${kanStamp(t)}
       <button class="kc-check" data-act="check" data-id="${t.id}" title="Mark complete">✓</button>
       <button class="kc-del" data-act="del" data-id="${t.id}" title="Remove">×</button>
     </div>`).join("");
@@ -344,6 +375,7 @@ function renderKanban(){
     body.innerHTML = col.map(t=>`
       <div class="kan-card" draggable="true" data-id="${t.id}">
         ${esc(t.text)}
+        ${kanStamp(t)}
         <button class="kc-del" data-act="del" data-id="${t.id}" title="Remove">×</button>
       </div>`).join("");
   });
@@ -351,9 +383,16 @@ function renderKanban(){
 
 /* task mutations */
 function setTasks(fn){ state.curDay.tasks = fn([...(state.curDay.tasks||[])]); persistDay(); }
-function addTask(text){ if(!text.trim()) return; setTasks(ts=>[...ts,{id:uid(),text:text.trim(),status:"todo"}]); }
+function addTask(text){
+  if(!text.trim()) return;
+  setTasks(ts=>[...ts,{id:uid(),text:text.trim(),status:"todo",createdAt:Date.now(),completedAt:null}]);
+}
 function delTask(id){ setTasks(ts=>ts.filter(t=>t.id!==id)); }
-function setStatus(id,status){ setTasks(ts=>ts.map(t=>t.id===id?{...t,status}:t)); }
+// stamp completedAt whenever a task lands in "done"; clear it when it leaves
+function setStatus(id,status){
+  setTasks(ts=>ts.map(t=>t.id!==id ? t
+    : {...t, status, completedAt: status==="done" ? (t.completedAt||Date.now()) : null}));
+}
 function cycleStatus(id){
   const cur=(state.curDay.tasks||[]).find(t=>t.id===id);
   if(cur?.backlog && cur.status!=="done") return;   // backlog tasks are locked out of the working buckets
@@ -363,7 +402,8 @@ function toggleDone(id){
   const cur=(state.curDay.tasks||[]).find(t=>t.id===id);
   const done = cur?.status==="done";
   // Completing a backlog task clears its flag so it moves into the COMPLETE bucket.
-  setTasks(ts=>ts.map(t=>t.id===id ? {...t, status: done?"todo":"done", backlog:false} : t));
+  setTasks(ts=>ts.map(t=>t.id!==id ? t
+    : {...t, status: done?"todo":"done", backlog:false, completedAt: done?null:Date.now()}));
 }
 
 /* list interactions */
@@ -481,7 +521,28 @@ $("#personSave").addEventListener("click", async ()=>{
   try{ await addPerson(name,email); }catch(e){ console.error(e); toast("Save failed — check Firestore rules.", true); }
 });
 
-/* nudge — targets the currently open operative */
+/* =====================================================================
+   EMAIL — one reusable sender used by both the nudge and the feed push.
+   EmailJS always renders a template, so we pass the custom subject + body
+   as params; add {{subject}} to your template to surface the subject line.
+   ===================================================================== */
+async function sendEmail(person, subject, message){
+  if(!emailReady) throw new Error("EmailJS not configured yet (need Service ID).");
+  // Send the address under several common variable names so it maps no matter
+  // which one the EmailJS template's "To Email" field references.
+  const params = {
+    to_email: person.email, email: person.email, user_email: person.email,
+    recipient: person.email, to: person.email, reply_to: person.email,
+    to_name: person.name, name: person.name,
+    from_name: CFG.myName||"A friend",
+    subject: subject||"TrackAbility", title: subject||"",
+    message,
+    days_behind: isBehind(person.id) ? "behind" : "on track"
+  };
+  return emailjs.send(CFG.emailjs.serviceId, CFG.emailjs.templateId, params);
+}
+
+/* nudge — a full custom composer (subject + body) for the open operative */
 const nudgeModal=$("#nudgeModal");
 $("#nudgeBtn").addEventListener("click", ()=>{ if(state.selPerson) openNudge(state.selPerson); });
 function openNudge(personId){
@@ -490,40 +551,181 @@ function openNudge(personId){
   const behind=isBehind(personId);
   $("#nudgeSummary").innerHTML = behind
     ? `<b>${esc(p.name)}</b> looks <b>behind</b> on today's log. Fire off a friendly nudge to <b>${esc(p.email)}</b>.`
-    : `Send an accountability ping to <b>${esc(p.name)}</b> at <b>${esc(p.email)}</b>.`;
+    : `Send a custom message to <b>${esc(p.name)}</b> at <b>${esc(p.email)}</b>.`;
+  $("#nudgeSubject").value = `Accountability check-in`;
   $("#nudgeMsg").value = `Hey ${p.name}, just checking in — don't forget to log your accountability tracker today. Let's keep the streak going! 💪`;
   nudgeModal.dataset.target=personId;
   nudgeModal.classList.remove("hidden");
+  $("#nudgeSubject").focus();
 }
 $("#nudgeCancel").addEventListener("click", ()=>nudgeModal.classList.add("hidden"));
 $("#nudgeSend").addEventListener("click", async ()=>{
   const p=state.people.find(x=>x.id===nudgeModal.dataset.target); if(!p) return;
   if(!emailReady){ toast("EmailJS not configured yet (need Service ID).", true); return; }
   const btn=$("#nudgeSend"); btn.disabled=true; btn.textContent="SENDING…";
-  // Send the address under several common variable names so it maps no matter
-  // which one the EmailJS template's "To Email" field references.
-  const params = {
-    to_email: p.email, email: p.email, user_email: p.email, recipient: p.email, to: p.email, reply_to: p.email,
-    to_name: p.name, name: p.name,
-    from_name: CFG.myName||"A friend",
-    message: $("#nudgeMsg").value,
-    days_behind: isBehind(p.id) ? "behind" : "on track"
-  };
   try{
-    await emailjs.send(CFG.emailjs.serviceId, CFG.emailjs.templateId, params);
-    toast(`Nudge sent to ${p.name}.`);
+    await sendEmail(p, $("#nudgeSubject").value.trim(), $("#nudgeMsg").value);
+    toast(`Message sent to ${p.name}.`);
     nudgeModal.classList.add("hidden");
   }catch(e){
     console.error("EmailJS error:", e);
     const detail = (e && (e.text || e.message)) ? `${e.status||""} ${e.text||e.message}`.trim() : "unknown error";
     toast(`Email failed: ${detail}`, true);
   }
-  finally{ btn.disabled=false; btn.textContent="▸ SEND NUDGE"; }
+  finally{ btn.disabled=false; btn.textContent="▸ SEND"; }
 });
 
 /* close modals on backdrop click / Esc */
 [personModal,nudgeModal].forEach(m=>m.addEventListener("click", e=>{ if(e.target===m) m.classList.add("hidden"); }));
 document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ personModal.classList.add("hidden"); nudgeModal.classList.add("hidden"); }});
+
+/* =====================================================================
+   DAY FEED — text + image wall, stored on the day doc (merge writes so it
+   never collides with task/note saves). Images are downscaled client-side.
+   ===================================================================== */
+const MAX_DAY_BYTES = 950000;   // Firestore caps a document at ~1 MiB
+let pendingFeedImg = null;      // staged data-URI awaiting POST
+
+function renderFeed(){
+  const list=$("#feedList");
+  const feed=[...(state.curDay.feed||[])].sort((a,b)=>(b.ts||0)-(a.ts||0)); // newest first
+  if(!feed.length){ list.innerHTML=`<div class="feed-empty">No posts yet — drop a note or image above.</div>`; return; }
+  list.innerHTML = feed.map(f=>{
+    const img = (f.image && f.image.startsWith("data:image/"))
+      ? `<img class="feed-img" src="${f.image}" alt="feed image" loading="lazy">` : "";
+    const txt = f.text ? `<div class="feed-text">${esc(f.text)}</div>` : "";
+    return `<div class="feed-item" data-id="${f.id}">
+      <div class="feed-meta">
+        <span class="feed-author">${esc(f.author||"—")}</span>
+        <span class="feed-ts">${fmtTime(f.ts)}</span>
+        <button class="feed-del" data-act="feeddel" data-id="${f.id}" title="Remove">×</button>
+      </div>
+      ${img}${txt}
+    </div>`;
+  }).join("");
+}
+
+function approxDayBytes(extra=""){
+  try{ return JSON.stringify(state.curDay||{}).length + (extra?extra.length:0); }catch(e){ return 0; }
+}
+function compressImage(file, maxDim=1100, quality=0.62){
+  return new Promise((resolve,reject)=>{
+    const fr=new FileReader();
+    fr.onerror=()=>reject(new Error("Could not read file"));
+    fr.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const scale=Math.min(1, maxDim/Math.max(img.width,img.height));
+        const w=Math.round(img.width*scale), h=Math.round(img.height*scale);
+        const c=document.createElement("canvas"); c.width=w; c.height=h;
+        c.getContext("2d").drawImage(img,0,0,w,h);
+        resolve(c.toDataURL("image/jpeg", quality));
+      };
+      img.onerror=()=>reject(new Error("Not a valid image"));
+      img.src=fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+async function stageImage(file){
+  if(!file || !file.type.startsWith("image/")){ toast("That's not an image.", true); return; }
+  try{
+    let data = await compressImage(file);
+    if(data.length > 600000) data = await compressImage(file, 800, 0.5);  // shrink further if still heavy
+    pendingFeedImg = data;
+    const prev=$("#feedImgPreview");
+    prev.innerHTML = `<img src="${data}" alt="preview"><button id="feedImgClear" title="Remove image">×</button>`;
+    prev.classList.remove("hidden");
+  }catch(e){ console.error(e); toast(e.message||"Image failed.", true); }
+}
+function clearStagedImage(){
+  pendingFeedImg=null;
+  const prev=$("#feedImgPreview"); prev.innerHTML=""; prev.classList.add("hidden");
+}
+async function postFeed(){
+  if(!state.selPerson||!state.selDate){ toast("Open a day first.", true); return; }
+  const text=$("#feedText").value.trim();
+  if(!text && !pendingFeedImg) return;
+  if(pendingFeedImg && approxDayBytes(pendingFeedImg) > MAX_DAY_BYTES){
+    toast("This day's feed is full — delete an older image first.", true); return;
+  }
+  const item={ id:uid(), text, image:pendingFeedImg||"", author:CFG.myName||"Anon", ts:Date.now() };
+  state.curDay.feed=[...(state.curDay.feed||[]), item];
+  $("#feedText").value=""; clearStagedImage();
+  renderFeed();
+  try{ await persistFeed(); }
+  catch(e){ console.error(e); toast("Post failed — image may be too large.", true); }
+}
+function delFeed(id){
+  state.curDay.feed=(state.curDay.feed||[]).filter(f=>f.id!==id);
+  renderFeed();
+  persistFeed().catch(e=>console.error(e));
+}
+
+/* feed wiring */
+$("#feedPost").addEventListener("click", postFeed);
+$("#feedText").addEventListener("keydown", e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)) postFeed(); });
+$("#feedImg").addEventListener("change", e=>{ if(e.target.files[0]) stageImage(e.target.files[0]); e.target.value=""; });
+$("#feedImgPreview").addEventListener("click", e=>{ if(e.target.id==="feedImgClear") clearStagedImage(); });
+$("#feedList").addEventListener("click", e=>{
+  const del=e.target.closest('[data-act="feeddel"]'); if(del) delFeed(del.dataset.id);
+});
+const feedCompose=$("#feedCompose");
+["dragover","dragenter"].forEach(ev=>feedCompose.addEventListener(ev, e=>{ e.preventDefault(); feedCompose.classList.add("drop-hot"); }));
+["dragleave","dragend"].forEach(ev=>feedCompose.addEventListener(ev, ()=>feedCompose.classList.remove("drop-hot")));
+feedCompose.addEventListener("drop", e=>{
+  e.preventDefault(); feedCompose.classList.remove("drop-hot");
+  const file=[...(e.dataTransfer.files||[])].find(f=>f.type.startsWith("image/"));
+  if(file) stageImage(file);
+});
+$("#feedText").addEventListener("paste", e=>{
+  const item=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/"));
+  if(item){ e.preventDefault(); stageImage(item.getAsFile()); }
+});
+
+/* push the day's feed to the operative by email (reuses sendEmail) */
+$("#feedPushBtn").addEventListener("click", async ()=>{
+  const p=state.people.find(x=>x.id===state.selPerson); if(!p) return;
+  if(!p.email){ toast(`${p.name} has no email on file.`, true); return; }
+  if(!emailReady){ toast("EmailJS not configured yet (need Service ID).", true); return; }
+  const feed=[...(state.curDay.feed||[])].sort((a,b)=>(a.ts||0)-(b.ts||0));
+  if(!feed.length){ toast("Nothing in the feed to push yet.", true); return; }
+  let imgs=0;
+  const lines=feed.map(f=>{
+    if(f.image) imgs++;
+    const body=f.text || (f.image ? "[image]" : "");
+    return `• ${fmtTime(f.ts)} — ${f.author||"—"}: ${body}${f.text&&f.image?" [+image]":""}`;
+  });
+  const note=imgs ? `\n\n(${imgs} image${imgs>1?"s":""} posted — open TrackAbility to view.)` : "";
+  const msg=`Day feed for ${fmtDate(state.selDate)}:\n\n${lines.join("\n")}${note}`;
+  const btn=$("#feedPushBtn"), lbl=btn.textContent; btn.disabled=true; btn.textContent="SENDING…";
+  try{
+    await sendEmail(p, `Day feed — ${state.selDate}`, msg);
+    toast(`Feed pushed to ${p.name}.`);
+  }catch(e){ console.error(e); toast(`Push failed: ${(e&&(e.text||e.message))||"error"}`, true); }
+  finally{ btn.disabled=false; btn.textContent=lbl; }
+});
+
+/* =====================================================================
+   OPERATIVE CONTEXT MENU — right-click a row to delete
+   ===================================================================== */
+const opMenu=$("#opMenu");
+$("#peopleList").addEventListener("contextmenu", e=>{
+  const row=e.target.closest("[data-act='selectop']"); if(!row) return;
+  e.preventDefault();
+  opMenu.dataset.p=row.dataset.p;
+  opMenu.style.left=Math.min(e.clientX, window.innerWidth-170)+"px";
+  opMenu.style.top =Math.min(e.clientY, window.innerHeight-60)+"px";
+  opMenu.classList.remove("hidden");
+});
+function hideOpMenu(){ opMenu.classList.add("hidden"); }
+$("#opMenuDelete").addEventListener("click", ()=>{
+  const id=opMenu.dataset.p; hideOpMenu();
+  if(id) confirmDeletePerson(id);
+});
+document.addEventListener("click", e=>{ if(!e.target.closest("#opMenu")) hideOpMenu(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") hideOpMenu(); });
+$("#peopleList").addEventListener("scroll", hideOpMenu);
 
 /* =====================================================================
    SIDEBAR COLLAPSE  (desktop slide-away + mobile drawer)

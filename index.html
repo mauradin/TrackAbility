@@ -128,6 +128,25 @@
           </div>
           <textarea id="noteArea" placeholder="Free-form notes for the day — reflections, blockers, wins…"></textarea>
         </div>
+
+        <!-- day feed wall -->
+        <div class="feed-block">
+          <div class="feed-label">
+            <span>◈ DAY FEED</span>
+            <button id="feedPushBtn" class="ghost-btn sm" title="Email this feed to the operative">▲ PUSH FEED</button>
+          </div>
+          <div id="feedCompose" class="feed-compose">
+            <textarea id="feedText" placeholder="Drop a note, paste or drag an image here…  (Ctrl/⌘+Enter to post)"></textarea>
+            <div id="feedImgPreview" class="feed-img-preview hidden"></div>
+            <div class="feed-compose-actions">
+              <label class="feed-img-btn" title="Attach image">🖼 IMAGE
+                <input id="feedImg" type="file" accept="image/*" hidden />
+              </label>
+              <button id="feedPost" class="primary-btn sm">▸ POST</button>
+            </div>
+          </div>
+          <div id="feedList" class="feed-list"></div>
+        </div>
       </section>
     </main>
   </div>
@@ -152,16 +171,24 @@
   <!-- ================= MODAL: nudge ================= -->
   <div id="nudgeModal" class="modal hidden">
     <div class="modal-card">
-      <div class="modal-head alert">▲ ACCOUNTABILITY NUDGE</div>
+      <div class="modal-head alert">▲ SEND MESSAGE</div>
       <p id="nudgeSummary" class="nudge-summary"></p>
+      <label>Subject
+        <input id="nudgeSubject" type="text" placeholder="Subject line" maxlength="120" />
+      </label>
       <label>Message
-        <textarea id="nudgeMsg" rows="4"></textarea>
+        <textarea id="nudgeMsg" rows="5"></textarea>
       </label>
       <div class="modal-actions">
         <button id="nudgeCancel" class="ghost-btn">CANCEL</button>
-        <button id="nudgeSend" class="primary-btn alert">▸ SEND NUDGE</button>
+        <button id="nudgeSend" class="primary-btn alert">▸ SEND</button>
       </div>
     </div>
+  </div>
+
+  <!-- operative right-click menu -->
+  <div id="opMenu" class="op-menu hidden">
+    <button id="opMenuDelete" class="op-menu-item danger">✕ Delete operative</button>
   </div>
 
   <!-- toast -->

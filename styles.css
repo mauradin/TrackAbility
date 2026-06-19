@@ -305,6 +305,53 @@ body.nav-collapsed .nav-reopen{display:grid}
 #noteArea{width:100%;min-height:120px;background:transparent;border:none;outline:none;resize:vertical;
   color:var(--text);font-family:"Chakra Petch";font-size:14px;line-height:1.7;padding:16px}
 
+/* ---------- task timestamps ---------- */
+.task-time{display:inline-flex;gap:10px;margin-left:10px;font-size:10.5px;color:var(--text-faint);
+  font-family:"Oxanium";letter-spacing:.5px;vertical-align:middle;white-space:nowrap}
+.task-time .done{color:var(--green)}
+.kc-time{margin-top:6px;font-size:9.5px;color:var(--text-faint);font-family:"Oxanium";letter-spacing:.5px}
+
+/* small button variants */
+.primary-btn.sm{font-size:11px;padding:8px 14px}
+.ghost-btn.sm{font-size:10px;letter-spacing:1.5px;padding:6px 11px}
+
+/* ---------- day feed wall ---------- */
+.feed-block{margin-top:22px;background:var(--panel);border:1px solid var(--line);clip-path:var(--clip)}
+.feed-label{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);
+  font-family:"Oxanium";font-size:11px;letter-spacing:2px;color:var(--cyan)}
+.feed-compose{position:relative;padding:14px 16px;border-bottom:1px solid var(--line);transition:.15s}
+.feed-compose.drop-hot{background:rgba(52,215,255,.07);box-shadow:inset 0 0 0 1px var(--cyan-dim)}
+#feedText{width:100%;min-height:60px;background:var(--bg-1);border:1px solid var(--line);outline:none;resize:vertical;
+  color:var(--text);font-family:"Chakra Petch";font-size:13.5px;line-height:1.6;padding:11px 13px;clip-path:var(--clip-sm)}
+#feedText:focus{border-color:var(--cyan-dim)}
+.feed-compose-actions{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:10px}
+.feed-img-btn{font-family:"Oxanium";font-size:10px;letter-spacing:1.5px;color:var(--text-dim);cursor:pointer;
+  border:1px solid var(--line-bright);padding:7px 12px;clip-path:var(--clip-sm);transition:.15s}
+.feed-img-btn:hover{color:var(--cyan);border-color:var(--cyan-dim)}
+.feed-img-preview{position:relative;margin-top:12px;display:inline-block}
+.feed-img-preview img{max-width:200px;max-height:160px;border:1px solid var(--line-bright);clip-path:var(--clip-sm);display:block}
+.feed-img-preview button{position:absolute;top:-8px;right:-8px;width:22px;height:22px;border-radius:50%;border:none;
+  background:var(--red);color:#fff;cursor:pointer;font-size:14px;line-height:1}
+.feed-list{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
+.feed-empty{padding:18px;text-align:center;color:var(--text-dim);font-style:italic;font-size:13px}
+.feed-item{background:var(--panel-2);border:1px solid var(--line);clip-path:var(--clip-sm);padding:10px 12px}
+.feed-meta{display:flex;align-items:center;gap:10px;font-family:"Oxanium";font-size:10px;letter-spacing:1px;color:var(--text-dim);margin-bottom:6px}
+.feed-author{color:var(--cyan)}
+.feed-ts{color:var(--text-faint)}
+.feed-del{margin-left:auto;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:15px;line-height:1;padding:0 2px;transition:.15s}
+.feed-del:hover{color:var(--red)}
+.feed-img{max-width:100%;border:1px solid var(--line);clip-path:var(--clip-sm);margin:2px 0 6px;display:block}
+.feed-text{font-size:13.5px;line-height:1.6;color:var(--text);white-space:pre-wrap;word-break:break-word}
+
+/* ---------- operative right-click menu ---------- */
+.op-menu{position:fixed;z-index:60;background:var(--panel-2);border:1px solid var(--line-bright);clip-path:var(--clip-sm);
+  box-shadow:0 18px 50px rgba(0,0,0,.6);padding:5px;min-width:158px}
+.op-menu-item{display:block;width:100%;text-align:left;background:none;border:none;cursor:pointer;
+  font-family:"Chakra Petch";font-size:13px;color:var(--text);padding:9px 12px;transition:.12s}
+.op-menu-item:hover{background:var(--panel)}
+.op-menu-item.danger{color:var(--red)}
+.op-menu-item.danger:hover{background:rgba(255,70,94,.12)}
+
 /* ---------- modals ---------- */
 .modal{position:fixed;inset:0;z-index:50;background:rgba(3,6,12,.78);backdrop-filter:blur(3px);display:grid;place-items:center;animation:fade .15s}
 @keyframes fade{from{opacity:0}}
