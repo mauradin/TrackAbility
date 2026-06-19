@@ -707,10 +707,6 @@ $("#feedPushBtn").addEventListener("click", async ()=>{
   toast(`Feed pushed to ${ok}/${recipients.length} operative(s).`, ok===0);
 });
 
-// never let a forum hiccup break the rest of the app's startup
-try{ subscribeForum(); }catch(e){ console.error("forum init failed", e); }
-showFeed();   // public feed is the default home screen
-
 /* =====================================================================
    OPERATIVE CONTEXT MENU — right-click a row to delete
    ===================================================================== */
@@ -735,7 +731,9 @@ $("#peopleList").addEventListener("scroll", hideOpMenu);
 /* =====================================================================
    SIDEBAR COLLAPSE  (desktop slide-away + mobile drawer)
    ===================================================================== */
-const isMobile = () => window.matchMedia("(max-width:820px)").matches;
+// function declaration (hoisted) so early callers like showFeed()/openDay()
+// can use it before this line runs — avoids a temporal-dead-zone crash.
+function isMobile(){ return window.matchMedia("(max-width:820px)").matches; }
 function setNav(collapsed, remember=true){
   document.body.classList.toggle("nav-collapsed", collapsed);
   if(remember && !isMobile()) localStorage.setItem("ta_nav_collapsed", collapsed ? "1" : "0");
@@ -778,3 +776,10 @@ function setSync(ok){
   $("#syncDot").className="sync-dot "+(ok?"online":"offline");
   $("#syncText").textContent = ok ? "LIVE — SYNCED" : "OFFLINE";
 }
+
+/* =====================================================================
+   STARTUP — run last, after every definition above is initialized, so the
+   default-screen render can safely call into nav/forum helpers.
+   ===================================================================== */
+try{ subscribeForum(); }catch(e){ console.error("forum init failed", e); }
+showFeed();   // public feed is the default home screen
