@@ -25,7 +25,12 @@ window.APP_CONFIG = {
   emailjs: {
     publicKey:  "CGwR7FuE602AyOQMi",            // <- your public key (already set)
     serviceId:  "MarSaraColony",                // <- your EmailJS service (set)
-    templateId: "AccountabilityPing"            // <- your template (already set)
+    templateId: "AccountabilityPing",           // <- nudge template (already set)
+    // OPTIONAL: a SEPARATE template for the "Push Feed" digest so it doesn't
+    // look like the accountability nudge. Create a plain template in EmailJS
+    // whose body is just {{subject}} + {{message}} and put its Template ID here.
+    // Leave "" to reuse the nudge template above.
+    feedTemplateId: ""
     // NOTE: your PRIVATE key is intentionally NOT here. It belongs only in
     // server-side code; putting it in the browser would let anyone send mail
     // through your account. The public key is all the browser SDK needs.

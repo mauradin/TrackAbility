@@ -500,7 +500,7 @@ $("#personSave").addEventListener("click", async ()=>{
    EmailJS always renders a template, so we pass the custom subject + body
    as params; add {{subject}} to your template to surface the subject line.
    ===================================================================== */
-async function sendEmail(person, subject, message){
+async function sendEmail(person, subject, message, templateId){
   if(!emailReady) throw new Error("EmailJS not configured yet (need Service ID).");
   // Send the address under several common variable names so it maps no matter
   // which one the EmailJS template's "To Email" field references.
@@ -513,7 +513,9 @@ async function sendEmail(person, subject, message){
     message,
     days_behind: isBehind(person.id) ? "behind" : "on track"
   };
-  return emailjs.send(CFG.emailjs.serviceId, CFG.emailjs.templateId, params);
+  // Callers may target a dedicated template (e.g. the Day Feed digest);
+  // otherwise fall back to the default accountability template.
+  return emailjs.send(CFG.emailjs.serviceId, templateId || CFG.emailjs.templateId, params);
 }
 
 /* nudge — a full custom composer (subject + body) for the open operative */
@@ -700,7 +702,7 @@ $("#feedPushBtn").addEventListener("click", async ()=>{
   const btn=$("#feedPushBtn"), lbl=btn.textContent; btn.disabled=true; btn.textContent="SENDING…";
   let ok=0;
   for(const p of recipients){
-    try{ await sendEmail(p, "TrackAbility — Day Feed", msg); ok++; }
+    try{ await sendEmail(p, "TrackAbility — Day Feed", msg, CFG.emailjs.feedTemplateId); ok++; }
     catch(e){ console.error("push to", p.name, e); }
   }
   btn.disabled=false; btn.textContent=lbl;
