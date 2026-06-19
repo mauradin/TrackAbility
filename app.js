@@ -31,9 +31,10 @@ try {
   }
 } catch (e) { console.warn("EmailJS init failed", e); }
 
-/* the public forum is stored under a reserved "person" id so it rides the
-   existing Firestore rules; it is hidden from the operatives list. */
-const FORUM_ID = "__dayfeed__";
+/* the public forum is stored under a sentinel "person" id so it rides the
+   existing Firestore rules; it is hidden from the operatives list. NOTE:
+   Firestore rejects ids matching __.*__ , so this must not use that pattern. */
+const FORUM_ID = "forum--shared";
 
 /* ---------- state ---------- */
 const state = {
@@ -636,7 +637,10 @@ async function postForum(){
   try{
     await setDoc(doc(db,"people",FORUM_ID,"days",uid()),
       { text, image:img||"", author:CFG.myName||"Anon", ts:Date.now(), createdAt:serverTimestamp() });
-  }catch(e){ console.error(e); toast("Post failed — image may be too large.", true); }
+  }catch(e){
+    console.error(e);
+    toast(`Post failed: ${(e&&(e.message||e.code))||"unknown error"}`, true);
+  }
 }
 async function delForum(id){
   try{ await deleteDoc(doc(db,"people",FORUM_ID,"days",id)); }
@@ -703,7 +707,8 @@ $("#feedPushBtn").addEventListener("click", async ()=>{
   toast(`Feed pushed to ${ok}/${recipients.length} operative(s).`, ok===0);
 });
 
-subscribeForum();
+// never let a forum hiccup break the rest of the app's startup
+try{ subscribeForum(); }catch(e){ console.error("forum init failed", e); }
 showFeed();   // public feed is the default home screen
 
 /* =====================================================================
