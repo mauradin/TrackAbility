@@ -242,9 +242,10 @@ function renderList(){
   const tasks=state.curDay.tasks||[];
   const wrap=$("#listView");
   if(!tasks.length){ wrap.innerHTML=`<div class="empty-tasks">No objectives logged for this day. Add one above.</div>`; return; }
-  const order={todo:0,doing:1,done:2};
-  wrap.innerHTML = [...tasks].sort((a,b)=>(order[a.status]||0)-(order[b.status]||0)).map(t=>`
-    <div class="task" data-status="${t.status}" data-id="${t.id}">
+  // Render in stored sequence so drag-to-reorder is meaningful.
+  wrap.innerHTML = tasks.map(t=>`
+    <div class="task" draggable="true" data-status="${t.status}" data-id="${t.id}">
+      <span class="task-grip" title="Drag to reorder" aria-hidden="true">⠿</span>
       <div class="check" data-act="check">✓</div>
       <div class="task-text">${esc(t.text)}</div>
       <button class="status-pill" data-act="cycle">${(t.status||"todo").toUpperCase()}</button>
@@ -289,6 +290,49 @@ $("#listView").addEventListener("click", e=>{
   if(el.dataset.act==="check") toggleDone(id);
   else if(el.dataset.act==="cycle") cycleStatus(id);
   else if(el.dataset.act==="del") delTask(id);
+});
+
+/* list drag-to-reorder — rewrites the stored task sequence */
+function reorderByIds(ids){
+  setTasks(ts=>{
+    const byId=new Map(ts.map(t=>[t.id,t]));
+    const next=ids.map(id=>byId.get(id)).filter(Boolean);
+    ts.forEach(t=>{ if(!ids.includes(t.id)) next.push(t); }); // safety: keep any stragglers
+    return next;
+  });
+}
+function dragAfterTask(container, y){
+  const els=[...container.querySelectorAll(".task:not(.dragging)")];
+  return els.reduce((closest, el)=>{
+    const box=el.getBoundingClientRect();
+    const offset=y - box.top - box.height/2;
+    return (offset<0 && offset>closest.offset) ? {offset, el} : closest;
+  }, {offset:Number.NEGATIVE_INFINITY, el:null}).el;
+}
+let listDragId=null;
+$("#listView").addEventListener("dragstart", e=>{
+  const t=e.target.closest(".task"); if(!t) return;
+  listDragId=t.dataset.id; t.classList.add("dragging");
+  e.dataTransfer.effectAllowed="move";
+});
+$("#listView").addEventListener("dragover", e=>{
+  if(!listDragId) return;
+  e.preventDefault();
+  const dragging=$("#listView .task.dragging"); if(!dragging) return;
+  const after=dragAfterTask($("#listView"), e.clientY);
+  if(after==null) $("#listView").appendChild(dragging);
+  else $("#listView").insertBefore(dragging, after);
+});
+$("#listView").addEventListener("drop", e=>{
+  if(!listDragId) return;
+  e.preventDefault();
+  const ids=$$("#listView .task").map(el=>el.dataset.id);
+  listDragId=null;
+  reorderByIds(ids); // persists; live snapshot re-renders the canonical order
+});
+$("#listView").addEventListener("dragend", e=>{
+  e.target.closest(".task")?.classList.remove("dragging");
+  listDragId=null;
 });
 
 /* kanban interactions */

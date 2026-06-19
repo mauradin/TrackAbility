@@ -219,6 +219,13 @@ body.nav-collapsed .nav-reopen{display:grid}
   padding:13px 16px;clip-path:var(--clip-sm);transition:.15s;position:relative;
 }
 .task:hover{border-color:var(--line-bright)}
+.task.dragging{opacity:.45;border-color:var(--cyan-dim);box-shadow:inset 0 0 0 1px var(--cyan-dim)}
+.task-grip{
+  color:var(--text-dim);cursor:grab;font-size:13px;line-height:1;letter-spacing:-3px;
+  flex-shrink:0;user-select:none;transition:.15s;margin-left:-4px;
+}
+.task-grip:hover{color:var(--cyan-dim)}
+.task:active .task-grip{cursor:grabbing}
 .task::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--text-dim);transition:.15s}
 .task[data-status="doing"]::before{background:var(--amber);box-shadow:var(--glow-amber)}
 .task[data-status="done"]::before{background:var(--green)}
