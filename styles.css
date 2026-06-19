@@ -15,6 +15,8 @@
   --amber-dim:#c9842a;
   --green:#46e8a0;
   --red:#ff465e;
+  --violet:#b18cff;
+  --violet-dim:#7a5bd0;
 
   --text:#cfe3f5;
   --text-dim:#7b93ad;
@@ -135,6 +137,12 @@ body.nav-collapsed .nav-reopen{display:grid}
 .person-flag{font-size:9px;letter-spacing:1px;padding:2px 6px;border-radius:3px;font-weight:700;flex-shrink:0}
 .person-flag.behind{background:rgba(255,70,94,.15);color:var(--red);border:1px solid rgba(255,70,94,.4);animation:pulse 1.6s infinite}
 .person-flag.ok{background:rgba(70,232,160,.12);color:var(--green);border:1px solid rgba(70,232,160,.3)}
+.op-del{
+  background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:17px;line-height:1;
+  padding:0 2px;flex-shrink:0;opacity:0;transition:.15s;
+}
+.op-row:hover .op-del{opacity:.7}
+.op-del:hover{opacity:1;color:var(--red)}
 @keyframes pulse{50%{opacity:.45}}
 
 /* TIER 2 — dates sub-rail */
@@ -220,6 +228,22 @@ body.nav-collapsed .nav-reopen{display:grid}
 }
 .task:hover{border-color:var(--line-bright)}
 .task.dragging{opacity:.45;border-color:var(--cyan-dim);box-shadow:inset 0 0 0 1px var(--cyan-dim)}
+/* list group dividers (BACKLOG / TODAY) */
+.list-group-label{
+  font-family:"Oxanium";font-size:10px;letter-spacing:2px;color:var(--text-dim);
+  padding:6px 2px 2px;margin-top:4px;
+}
+.list-group-label:first-child{margin-top:0}
+.list-group-label.backlog{color:var(--violet)}
+/* carried-over backlog rows — locked accent */
+.task.backlog{background:rgba(122,91,208,.08)}
+.task.backlog::before{background:var(--violet)!important;box-shadow:0 0 10px rgba(177,140,255,.45)}
+.task-grip.locked{cursor:default;color:var(--violet-dim)}
+.task-grip.locked:hover{color:var(--violet-dim)}
+.status-pill.is-backlog{
+  font-family:"Oxanium";font-size:9px;letter-spacing:1.5px;padding:4px 9px;border-radius:3px;
+  border:1px solid var(--violet-dim);background:transparent;color:var(--violet);cursor:default;
+}
 .task-grip{
   color:var(--text-dim);cursor:grab;font-size:13px;line-height:1;letter-spacing:-3px;
   flex-shrink:0;user-select:none;transition:.15s;margin-left:-4px;
@@ -246,7 +270,14 @@ body.nav-collapsed .nav-reopen{display:grid}
 .empty-tasks{padding:34px;text-align:center;color:var(--text-dim);font-style:italic;border:1px dashed var(--line);clip-path:var(--clip)}
 
 /* kanban */
-.kanban{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.kanban{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.kan-col.backlog{border-color:var(--violet-dim);background:rgba(122,91,208,.08)}
+.dot.backlog{background:var(--violet);box-shadow:0 0 10px rgba(177,140,255,.45)}
+.kan-card.backlog{border-color:var(--violet-dim);cursor:default;padding-right:50px}
+.kan-card.backlog:active{cursor:default}
+.kc-check{position:absolute;top:6px;right:26px;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;opacity:0;transition:.15s}
+.kan-card.backlog:hover .kc-check{opacity:1}
+.kc-check:hover{color:var(--green)}
 .kan-col{background:rgba(13,21,37,.55);border:1px solid var(--line);clip-path:var(--clip);min-height:160px;display:flex;flex-direction:column}
 .kan-head{font-family:"Oxanium";font-size:11px;letter-spacing:2px;color:var(--text-dim);padding:13px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
 .kan-head em{margin-left:auto;font-style:normal;color:var(--text);background:var(--panel-2);padding:1px 8px;border-radius:8px;font-size:10px}
@@ -333,6 +364,7 @@ body.nav-collapsed .nav-reopen{display:grid}
   .day-actions{flex-wrap:wrap;gap:8px}
   #dayTitle{font-size:22px}
   .kanban{grid-template-columns:1fr}
+  .op-del{opacity:.6}            /* no hover on touch — keep it reachable */
 
   /* floating menu button — bigger tap target, always reachable on mobile */
   .nav-reopen{width:46px;height:46px;font-size:20px}

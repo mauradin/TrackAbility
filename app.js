@@ -14,7 +14,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getFirestore, collection, doc, setDoc, onSnapshot,
-  serverTimestamp, query, orderBy
+  serverTimestamp, query, orderBy, getDocs, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const CFG = window.APP_CONFIG;
@@ -49,6 +49,9 @@ const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 const esc = s => (s??"").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const initials = n => (n||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
 const uid = () => "t" + Math.random().toString(36).slice(2,9) + (performance.now()|0).toString(36);
+// Which bucket a task lives in. Carried-over tasks sit in "backlog" until done,
+// at which point completion clears the flag and they move to the normal "done" bucket.
+const taskBucket = t => (t.backlog && t.status!=="done") ? "backlog" : (t.status||"todo");
 
 // "today" anchored to America/New_York (EST/EDT) -> YYYY-MM-DD
 function estTodayStr(){
@@ -121,14 +124,46 @@ function renderOps(){
         <span class="person-badge">${esc(initials(p.name))}</span>
         <span class="person-name">${esc(p.name)}</span>
         ${flag}
+        <button class="op-del" data-act="delop" data-p="${p.id}" title="Remove operative">×</button>
       </div>`;
   }).join("");
 }
 
 $("#peopleList").addEventListener("click", e=>{
+  const del = e.target.closest("[data-act='delop']");
+  if(del){ e.stopPropagation(); confirmDeletePerson(del.dataset.p); return; }
   const el = e.target.closest("[data-act='selectop']"); if(!el) return;
   selectPerson(el.dataset.p);
 });
+
+function confirmDeletePerson(personId){
+  const p=state.people.find(x=>x.id===personId); if(!p) return;
+  const n=(state.daysByPerson[personId]||[]).length;
+  if(!confirm(`Delete operative "${p.name}" and all ${n} logged day(s)? This cannot be undone.`)) return;
+  deletePerson(personId)
+    .then(()=>toast(`Operative "${p.name}" removed.`))
+    .catch(e=>{ console.error(e); toast("Delete failed — check Firestore rules.", true); });
+}
+
+async function deletePerson(personId){
+  // Client SDK doesn't cascade — delete every day doc, then the person, in one batch.
+  const daysSnap = await getDocs(collection(db,"people",personId,"days"));
+  const batch = writeBatch(db);
+  daysSnap.forEach(d=>batch.delete(d.ref));
+  batch.delete(doc(db,"people",personId));
+  await batch.commit();
+
+  // tear down local listeners + state for the removed operative
+  if(state.dayUnsubs[personId]){ state.dayUnsubs[personId](); delete state.dayUnsubs[personId]; }
+  delete state.daysByPerson[personId];
+  if(state.selPerson===personId){
+    if(state.daySub){ state.daySub(); state.daySub=null; }
+    state.selPerson=null; state.selDate=null; state.curDay=null;
+    $("#dayView").classList.add("hidden");
+    $("#welcome").classList.remove("hidden");
+    renderDateList();
+  }
+}
 
 function selectPerson(personId){
   state.selPerson = personId;
@@ -183,13 +218,24 @@ async function addPerson(name, email){
   toast(`Operative "${name}" deployed.`);
 }
 
+// Seed a fresh day's backlog from the latest prior day: anything not completed
+// rolls forward as a locked backlog task (carried-over backlog included).
+function carryForwardBacklog(personId, todayId){
+  const days = state.daysByPerson[personId] || [];   // already newest-first
+  const prev = days.find(d => d.id < todayId);        // most recent earlier day
+  if(!prev) return [];
+  return (prev.tasks||[])
+    .filter(t => t.status !== "done")
+    .map(t => ({ id: uid(), text: t.text, status: "todo", backlog: true }));
+}
+
 // create today's date doc if it doesn't already exist; returns today's id
 async function ensureToday(personId){
   const d = estTodayStr();
   const existing = (state.daysByPerson[personId]||[]).find(x=>x.id===d);
   if(!existing){
     await setDoc(doc(db,"people",personId,"days",d),
-      { date:d, note:"", tasks:[], updatedAt:serverTimestamp() });
+      { date:d, note:"", tasks:carryForwardBacklog(personId,d), updatedAt:serverTimestamp() });
   }
   return d;
 }
@@ -236,30 +282,64 @@ function renderDay(){
   if(state.view==="list") renderList(); else renderKanban();
 }
 
+function taskRow(t){
+  if(taskBucket(t)==="backlog"){
+    // Carried-over: locked to the backlog bucket. Can be completed or removed,
+    // but not dragged or reclassified into today's working buckets.
+    return `<div class="task backlog" data-status="${t.status}" data-id="${t.id}">
+      <span class="task-grip locked" title="Carried over — locked to backlog" aria-hidden="true">⟳</span>
+      <div class="check" data-act="check">✓</div>
+      <div class="task-text">${esc(t.text)}</div>
+      <span class="status-pill is-backlog" title="Carried over from a previous day">BACKLOG</span>
+      <button class="task-del" data-act="del" title="Remove">×</button>
+    </div>`;
+  }
+  return `<div class="task" draggable="true" data-status="${t.status}" data-id="${t.id}">
+      <span class="task-grip" title="Drag to reorder" aria-hidden="true">⠿</span>
+      <div class="check" data-act="check">✓</div>
+      <div class="task-text">${esc(t.text)}</div>
+      <button class="status-pill" data-act="cycle">${(t.status||"todo").toUpperCase()}</button>
+      <button class="task-del" data-act="del" title="Remove">×</button>
+    </div>`;
+}
+
 function renderList(){
   $("#listView").classList.remove("hidden");
   $("#kanbanView").classList.add("hidden");
   const tasks=state.curDay.tasks||[];
   const wrap=$("#listView");
   if(!tasks.length){ wrap.innerHTML=`<div class="empty-tasks">No objectives logged for this day. Add one above.</div>`; return; }
-  // Render in stored sequence so drag-to-reorder is meaningful.
-  wrap.innerHTML = tasks.map(t=>`
-    <div class="task" draggable="true" data-status="${t.status}" data-id="${t.id}">
-      <span class="task-grip" title="Drag to reorder" aria-hidden="true">⠿</span>
-      <div class="check" data-act="check">✓</div>
-      <div class="task-text">${esc(t.text)}</div>
-      <button class="status-pill" data-act="cycle">${(t.status||"todo").toUpperCase()}</button>
-      <button class="task-del" data-act="del" title="Remove">×</button>
-    </div>`).join("");
+  const backlog = tasks.filter(t=>taskBucket(t)==="backlog");
+  const active  = tasks.filter(t=>taskBucket(t)!=="backlog");   // rendered in stored order (drag-reorderable)
+  let html="";
+  if(backlog.length){
+    html += `<div class="list-group-label backlog">⟳ BACKLOG — carried over, clear it or it rolls again</div>`;
+    html += backlog.map(taskRow).join("");
+    if(active.length) html += `<div class="list-group-label">TODAY</div>`;
+  }
+  html += active.map(taskRow).join("");
+  wrap.innerHTML = html;
 }
 
 function renderKanban(){
   $("#listView").classList.add("hidden");
   $("#kanbanView").classList.remove("hidden");
   const tasks=state.curDay.tasks||[];
+
+  // Backlog column — locked cards: complete (✓) or remove only, never dragged out.
+  const backlog=tasks.filter(t=>taskBucket(t)==="backlog");
+  const bbody=$('.kan-body[data-bucket="backlog"]');
+  $('.kan-col[data-status="backlog"] [data-count]').textContent=backlog.length;
+  bbody.innerHTML = backlog.map(t=>`
+    <div class="kan-card backlog" data-id="${t.id}">
+      ${esc(t.text)}
+      <button class="kc-check" data-act="check" data-id="${t.id}" title="Mark complete">✓</button>
+      <button class="kc-del" data-act="del" data-id="${t.id}" title="Remove">×</button>
+    </div>`).join("");
+
   ["todo","doing","done"].forEach(stat=>{
     const body=$(`.kan-body[data-drop="${stat}"]`);
-    const col=tasks.filter(t=>(t.status||"todo")===stat);
+    const col=tasks.filter(t=>taskBucket(t)===stat);
     $(`.kan-col[data-status="${stat}"] [data-count]`).textContent=col.length;
     body.innerHTML = col.map(t=>`
       <div class="kan-card" draggable="true" data-id="${t.id}">
@@ -276,11 +356,14 @@ function delTask(id){ setTasks(ts=>ts.filter(t=>t.id!==id)); }
 function setStatus(id,status){ setTasks(ts=>ts.map(t=>t.id===id?{...t,status}:t)); }
 function cycleStatus(id){
   const cur=(state.curDay.tasks||[]).find(t=>t.id===id);
+  if(cur?.backlog && cur.status!=="done") return;   // backlog tasks are locked out of the working buckets
   setStatus(id, {todo:"doing",doing:"done",done:"todo"}[cur?.status||"todo"]);
 }
 function toggleDone(id){
   const cur=(state.curDay.tasks||[]).find(t=>t.id===id);
-  setStatus(id, cur?.status==="done" ? "todo" : "done");
+  const done = cur?.status==="done";
+  // Completing a backlog task clears its flag so it moves into the COMPLETE bucket.
+  setTasks(ts=>ts.map(t=>t.id===id ? {...t, status: done?"todo":"done", backlog:false} : t));
 }
 
 /* list interactions */
@@ -292,17 +375,18 @@ $("#listView").addEventListener("click", e=>{
   else if(el.dataset.act==="del") delTask(id);
 });
 
-/* list drag-to-reorder — rewrites the stored task sequence */
-function reorderByIds(ids){
+/* list drag-to-reorder — rewrites the stored sequence of the active (non-backlog) tasks */
+function reorderActiveByIds(ids){
   setTasks(ts=>{
+    const backlog=ts.filter(t=>taskBucket(t)==="backlog");
     const byId=new Map(ts.map(t=>[t.id,t]));
-    const next=ids.map(id=>byId.get(id)).filter(Boolean);
-    ts.forEach(t=>{ if(!ids.includes(t.id)) next.push(t); }); // safety: keep any stragglers
-    return next;
+    const active=ids.map(id=>byId.get(id)).filter(t=>t && taskBucket(t)!=="backlog");
+    ts.forEach(t=>{ if(taskBucket(t)!=="backlog" && !ids.includes(t.id)) active.push(t); }); // safety
+    return [...backlog, ...active];
   });
 }
 function dragAfterTask(container, y){
-  const els=[...container.querySelectorAll(".task:not(.dragging)")];
+  const els=[...container.querySelectorAll(".task:not(.dragging):not(.backlog)")];
   return els.reduce((closest, el)=>{
     const box=el.getBoundingClientRect();
     const offset=y - box.top - box.height/2;
@@ -311,7 +395,7 @@ function dragAfterTask(container, y){
 }
 let listDragId=null;
 $("#listView").addEventListener("dragstart", e=>{
-  const t=e.target.closest(".task"); if(!t) return;
+  const t=e.target.closest(".task"); if(!t || t.classList.contains("backlog")) return;
   listDragId=t.dataset.id; t.classList.add("dragging");
   e.dataTransfer.effectAllowed="move";
 });
@@ -326,9 +410,9 @@ $("#listView").addEventListener("dragover", e=>{
 $("#listView").addEventListener("drop", e=>{
   if(!listDragId) return;
   e.preventDefault();
-  const ids=$$("#listView .task").map(el=>el.dataset.id);
+  const ids=$$("#listView .task:not(.backlog)").map(el=>el.dataset.id);
   listDragId=null;
-  reorderByIds(ids); // persists; live snapshot re-renders the canonical order
+  reorderActiveByIds(ids); // persists; live snapshot re-renders the canonical order
 });
 $("#listView").addEventListener("dragend", e=>{
   e.target.closest(".task")?.classList.remove("dragging");
@@ -337,18 +421,20 @@ $("#listView").addEventListener("dragend", e=>{
 
 /* kanban interactions */
 $("#kanbanView").addEventListener("click", e=>{
-  const del=e.target.closest('[data-act="del"]'); if(del) delTask(del.dataset.id);
+  const act=e.target.closest("[data-act]"); if(!act) return;
+  if(act.dataset.act==="del") delTask(act.dataset.id);
+  else if(act.dataset.act==="check") toggleDone(act.dataset.id);
 });
 let dragId=null;
 $("#kanbanView").addEventListener("dragstart", e=>{
-  const card=e.target.closest(".kan-card"); if(!card) return;
+  const card=e.target.closest(".kan-card"); if(!card || card.classList.contains("backlog")) return;
   dragId=card.dataset.id; card.classList.add("dragging");
 });
 $("#kanbanView").addEventListener("dragend", e=>{
   e.target.closest(".kan-card")?.classList.remove("dragging");
   $$(".kan-body").forEach(b=>b.classList.remove("drag-over"));
 });
-$$(".kan-body").forEach(body=>{
+$$(".kan-body[data-drop]").forEach(body=>{   // backlog column is not a drop target
   body.addEventListener("dragover", e=>{ e.preventDefault(); body.classList.add("drag-over"); });
   body.addEventListener("dragleave", ()=>body.classList.remove("drag-over"));
   body.addEventListener("drop", e=>{
